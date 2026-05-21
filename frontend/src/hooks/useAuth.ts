@@ -19,13 +19,15 @@ export function useAuth(requireAuth = false) {
   const router = useRouter()
 
   useEffect(() => {
-    const run = async () => {
-      await initialize()
-      if (requireAuth && !useAuthStore.getState().isAuthenticated) {
-        router.replace(ROUTES.LOGIN)
-      }
-    }
-    run()
+    initialize()
+      .then(() => {
+        if (requireAuth && !useAuthStore.getState().isAuthenticated) {
+          router.replace(ROUTES.LOGIN)
+        }
+      })
+      .catch(() => {
+        if (requireAuth) router.replace(ROUTES.LOGIN)
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requireAuth])
 

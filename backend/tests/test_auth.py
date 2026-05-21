@@ -245,3 +245,51 @@ async def test_forgot_password_always_returns_200(client: AsyncClient) -> None:
         resp = await client.post("/api/v1/auth/forgot-password", json={"email": email})
         assert resp.status_code == 200
         assert resp.json()["status"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# Change password
+# ---------------------------------------------------------------------------
+
+
+async def test_change_password_success(
+    client: AsyncClient, auth_headers: dict
+) -> None:
+    resp = await client.post(
+        "/api/v1/auth/change-password",
+        headers=auth_headers,
+        json={"current_password": "StrongPass1", "new_password": "NewPass456!"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "success"
+    assert "message" in resp.json()["data"]
+
+
+async def test_change_password_wrong_current_fails(
+    client: AsyncClient, auth_headers: dict
+) -> None:
+    resp = await client.post(
+        "/api/v1/auth/change-password",
+        headers=auth_headers,
+        json={"current_password": "WrongPassword9", "new_password": "NewPass456!"},
+    )
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Update profile
+# ---------------------------------------------------------------------------
+
+
+async def test_update_profile_success(
+    client: AsyncClient, auth_headers: dict
+) -> None:
+    resp = await client.patch(
+        "/api/v1/auth/me",
+        headers=auth_headers,
+        json={"full_name": "Arjun Updated", "phone": "+919876543210"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["data"]["full_name"] == "Arjun Updated"

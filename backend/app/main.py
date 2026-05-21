@@ -7,15 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.responses import Response
-from starlette.types import ASGIApp
 
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.database import check_database_health
+import redis.asyncio as aioredis
 from app.core.exceptions import GSTSenseException, generic_exception_handler, gstsense_exception_handler
 from app.core.logging import RequestLoggingMiddleware, get_logger, setup_logging
+from app.middleware.security_headers import SecurityHeadersMiddleware as EnhancedSecurityHeaders
 
 logger = get_logger(__name__)
 
@@ -74,34 +73,12 @@ app = FastAPI(
 
 
 # ---------------------------------------------------------------------------
-# Security headers middleware
-# ---------------------------------------------------------------------------
-
-
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Attach security-related HTTP headers to every response."""
-
-    def __init__(self, app: ASGIApp) -> None:
-        super().__init__(app)
-
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        return response
-
-
-# ---------------------------------------------------------------------------
 # Middleware stack
 # Note: add_middleware stacks in reverse — last added runs outermost on request.
 # Desired order: CORS → RequestLogging → SecurityHeaders → app
 # ---------------------------------------------------------------------------
 
-app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(EnhancedSecurityHeaders)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -134,9 +111,18 @@ async def health_check() -> JSONResponse:
     """
     db_ok = await check_database_health()
 
+    redis_ok = False
+    try:
+        r = aioredis.from_url(settings.REDIS_URL, socket_connect_timeout=2)
+        await r.ping()
+        await r.aclose()
+        redis_ok = True
+    except Exception:
+        pass
+
     checks = {
         "database": db_ok,
-        "redis": False,  # wired in when Redis service is added
+        "redis": redis_ok,
     }
     all_healthy = all(checks.values())
 

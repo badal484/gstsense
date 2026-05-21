@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -413,6 +414,248 @@ class _ReportBuilder:
         return buf.getvalue()
 
 
+def generate_notice_reply_pdf(
+    notice_number: str,
+    organization_name: str,
+    gstin: str,
+    draft_reply_text: str,
+    icai_membership_number: str,
+    generated_at: datetime,
+    warnings: Optional[list[str]] = None,
+) -> bytes:
+    """Generate PDF of notice reply draft with non-removable legal disclaimer."""
+    from app.services.notice_drafter import LEGAL_DISCLAIMER
+
+    NOTICE_RED = HexColor("#CC0000")
+    AMBER_BG = HexColor("#FFF8E1")
+    AMBER_BORDER = HexColor("#FF8F00")
+    PLACEHOLDER_COLOR = HexColor("#E65100")
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=MARGIN,
+        rightMargin=MARGIN,
+        topMargin=MARGIN + 14 * mm,
+        bottomMargin=MARGIN + 20 * mm,
+        title=f"GSTSense Notice Reply Draft — {notice_number}",
+        author="GSTSense",
+    )
+
+    disclaimer_style = ParagraphStyle(
+        "disclaimer",
+        fontName="Helvetica",
+        fontSize=7,
+        textColor=NOTICE_RED,
+        leading=10,
+        alignment=TA_CENTER,
+    )
+    header_warning_style = ParagraphStyle(
+        "header_warning",
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        textColor=NOTICE_RED,
+        leading=12,
+        alignment=TA_RIGHT,
+    )
+    meta_label_style = ParagraphStyle(
+        "meta_label",
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        textColor=DARK_GRAY,
+        leading=11,
+    )
+    meta_value_style = ParagraphStyle(
+        "meta_value",
+        fontName="Helvetica",
+        fontSize=8,
+        textColor=DARK_GRAY,
+        leading=11,
+    )
+    section_style = ParagraphStyle(
+        "notice_section",
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        textColor=BRAND_PURPLE,
+        leading=14,
+        spaceBefore=6,
+        spaceAfter=3,
+    )
+    body_style = ParagraphStyle(
+        "notice_body",
+        fontName="Helvetica",
+        fontSize=9,
+        textColor=DARK_GRAY,
+        leading=13,
+        spaceAfter=4,
+    )
+    placeholder_style = ParagraphStyle(
+        "placeholder",
+        fontName="Helvetica-Oblique",
+        fontSize=9,
+        textColor=PLACEHOLDER_COLOR,
+        leading=13,
+    )
+    warning_style = ParagraphStyle(
+        "warning_item",
+        fontName="Helvetica",
+        fontSize=8,
+        textColor=HexColor("#5D4037"),
+        leading=11,
+    )
+
+    def _on_notice_page(canvas, doc):  # type: ignore[no-untyped-def]
+        canvas.saveState()
+
+        # ---- Header ----
+        header_y = PAGE_H - MARGIN + 2 * mm
+        canvas.setFont("Helvetica-Bold", 13)
+        canvas.setFillColor(BRAND_PURPLE)
+        canvas.drawString(MARGIN, header_y, "GSTSense")
+
+        canvas.setFont("Helvetica-Bold", 8)
+        canvas.setFillColor(NOTICE_RED)
+        canvas.drawRightString(
+            PAGE_W - MARGIN,
+            header_y,
+            "Notice Reply Draft — NOT FOR DIRECT SUBMISSION",
+        )
+
+        canvas.setStrokeColor(NOTICE_RED)
+        canvas.setLineWidth(1.0)
+        canvas.line(MARGIN, header_y - 4 * mm, PAGE_W - MARGIN, header_y - 4 * mm)
+
+        # ---- Footer disclaimer (non-removable) ----
+        footer_top = MARGIN - 2 * mm
+        box_h = 17 * mm
+        canvas.setStrokeColor(NOTICE_RED)
+        canvas.setLineWidth(0.8)
+        canvas.rect(MARGIN, footer_top - box_h, PAGE_W - 2 * MARGIN, box_h)
+
+        canvas.setFont("Helvetica-Bold", 7)
+        canvas.setFillColor(NOTICE_RED)
+        canvas.drawString(MARGIN + 2 * mm, footer_top - 4 * mm, "⚠ LEGAL DISCLAIMER")
+
+        # Wrap disclaimer text manually into the box
+        canvas.setFont("Helvetica", 6.5)
+        canvas.setFillColor(DARK_GRAY)
+        disclaimer_words = LEGAL_DISCLAIMER.split()
+        line = ""
+        y_pos = footer_top - 8 * mm
+        max_w = PAGE_W - 2 * MARGIN - 4 * mm
+        for word in disclaimer_words:
+            test_line = f"{line} {word}".strip()
+            if canvas.stringWidth(test_line, "Helvetica", 6.5) < max_w:
+                line = test_line
+            else:
+                canvas.drawString(MARGIN + 2 * mm, y_pos, line)
+                y_pos -= 3.5 * mm
+                line = word
+        if line:
+            canvas.drawString(MARGIN + 2 * mm, y_pos, line)
+
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(DARK_GRAY)
+        canvas.drawCentredString(PAGE_W / 2, footer_top - box_h - 3 * mm, f"Page {doc.page}")
+
+        canvas.restoreState()
+
+    story: list = []
+
+    # ---- Meta block ----
+    generated_str = generated_at.strftime("%d %B %Y, %I:%M %p")
+    left_meta = [
+        [Paragraph("Reference Notice:", meta_label_style), Paragraph(notice_number, meta_value_style)],
+        [Paragraph("Taxpayer:", meta_label_style), Paragraph(organization_name, meta_value_style)],
+        [Paragraph("GSTIN:", meta_label_style), Paragraph(gstin, meta_value_style)],
+    ]
+    right_meta = [
+        [Paragraph("Generated:", meta_label_style), Paragraph(generated_str, meta_value_style)],
+        [Paragraph("Prepared by CA:", meta_label_style), Paragraph(icai_membership_number, meta_value_style)],
+        [Paragraph("Status:", meta_label_style), Paragraph("DRAFT — REQUIRES CA REVIEW", ParagraphStyle(
+            "status", fontName="Helvetica-Bold", fontSize=8, textColor=NOTICE_RED, leading=11,
+        ))],
+    ]
+    cell_s = TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+    ])
+    left_tbl = Table(left_meta, colWidths=[3.5 * cm, 7 * cm])
+    left_tbl.setStyle(cell_s)
+    right_tbl = Table(right_meta, colWidths=[3.5 * cm, 7 * cm])
+    right_tbl.setStyle(cell_s)
+    meta_row = Table([[left_tbl, right_tbl]], colWidths=[11 * cm, 10 * cm])
+    meta_row.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BACKGROUND", (0, 0), (-1, -1), LIGHT_GRAY),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(meta_row)
+    story.append(Spacer(1, 4 * mm))
+
+    # ---- Warnings box ----
+    if warnings:
+        warn_rows = [[Paragraph("⚠ AI Verification Warnings:", ParagraphStyle(
+            "warn_hdr", fontName="Helvetica-Bold", fontSize=9, textColor=HexColor("#5D4037"), leading=12,
+        ))]]
+        for w in warnings:
+            warn_rows.append([Paragraph(f"• {w}", warning_style)])
+        warn_tbl = Table(warn_rows, colWidths=[PAGE_W - 2 * MARGIN])
+        warn_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), AMBER_BG),
+            ("BOX", (0, 0), (-1, -1), 0.8, AMBER_BORDER),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(warn_tbl)
+        story.append(Spacer(1, 4 * mm))
+
+    # ---- Draft content ----
+    story.append(HRFlowable(width="100%", thickness=0.5, color=NOTICE_RED))
+    story.append(Spacer(1, 3 * mm))
+
+    for line in draft_reply_text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            story.append(Spacer(1, 2 * mm))
+            continue
+        # Detect section headings (numbered or ALL CAPS short lines)
+        if re.match(r"^\d+\.", stripped) or (stripped.isupper() and len(stripped) < 80):
+            story.append(Paragraph(stripped, section_style))
+        elif "[PLACEHOLDER" in stripped or "[placeholder" in stripped.lower():
+            story.append(Paragraph(stripped, placeholder_style))
+        else:
+            story.append(Paragraph(stripped, body_style))
+
+    story.append(Spacer(1, 8 * mm))
+
+    # ---- Signature block ----
+    sig_data = [
+        [Paragraph("Signature:", meta_label_style), Paragraph("_" * 35, meta_value_style)],
+        [Paragraph("Name:", meta_label_style), Paragraph("_" * 35, meta_value_style)],
+        [Paragraph("ICAI Membership No:", meta_label_style), Paragraph("_" * 25, meta_value_style)],
+        [Paragraph("Date:", meta_label_style), Paragraph("_" * 25, meta_value_style)],
+    ]
+    sig_tbl = Table(sig_data, colWidths=[4.5 * cm, 10 * cm])
+    sig_tbl.setStyle(cell_s)
+    story.append(sig_tbl)
+    story.append(Spacer(1, 3 * mm))
+    story.append(Paragraph(
+        "This reply must be signed by the authorized representative before submission to the GST portal.",
+        ParagraphStyle("sig_note", fontName="Helvetica-Oblique", fontSize=8, textColor=NOTICE_RED, leading=11),
+    ))
+
+    doc.build(story, onFirstPage=_on_notice_page, onLaterPages=_on_notice_page)
+    logger.info("notice_pdf_generated", notice_number=notice_number, bytes=buf.tell())
+    return buf.getvalue()
+
+
 def generate_mismatch_report(report_data: ReportData) -> bytes:
     """Generate professional PDF mismatch report. Returns PDF as bytes."""
     logger.info(
@@ -424,3 +667,146 @@ def generate_mismatch_report(report_data: ReportData) -> bytes:
     pdf_bytes = _ReportBuilder(report_data).build()
     logger.info("pdf_generation_complete", bytes=len(pdf_bytes))
     return pdf_bytes
+
+
+def generate_bulk_ca_report(
+    firm_name: str,
+    primary_ca_name: str,
+    icai_membership_number: str,
+    city: str,
+    state: str,
+    total_clients: int,
+    total_earnings: float,
+    clients: list[dict],
+    commissions: list[dict],
+    generated_at: datetime,
+) -> bytes:
+    """Generate a bulk CA firm report PDF. Returns PDF bytes."""
+    styles = _build_styles()
+    buf = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=MARGIN,
+        rightMargin=MARGIN,
+        topMargin=MARGIN,
+        bottomMargin=MARGIN + 1 * cm,
+    )
+
+    story = []
+
+    # Header
+    story.append(Paragraph(firm_name, styles["section_title"]))
+    story.append(Paragraph(
+        f"{primary_ca_name} · ICAI {icai_membership_number} · {city}, {state}",
+        styles["label"],
+    ))
+    story.append(Spacer(1, 6))
+    story.append(HRFlowable(width="100%", thickness=1, color=BRAND_PURPLE))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(
+        f"Client Portfolio Report — Generated {generated_at.strftime('%d %B %Y %H:%M UTC')}",
+        styles["body"],
+    ))
+    story.append(Spacer(1, 12))
+
+    # Summary row
+    summary_data = [
+        ["Total Clients", "Active Clients", "Total Earnings"],
+        [
+            str(total_clients),
+            str(sum(1 for c in clients)),
+            f"₹{total_earnings:,.2f}",
+        ],
+    ]
+    summary_table = Table(
+        summary_data,
+        colWidths=[(PAGE_W - 2 * MARGIN) / 3] * 3,
+    )
+    summary_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), BRAND_PURPLE),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [LIGHT_GRAY, WHITE]),
+        ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#CCCCCC")),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 16))
+
+    # Clients table
+    if clients:
+        story.append(Paragraph("Client Organisations", styles["section_title"]))
+        story.append(Spacer(1, 6))
+        col_w = (PAGE_W - 2 * MARGIN) / 4
+        header_row = [
+            Paragraph("<b>Organisation</b>", styles["table_header"]),
+            Paragraph("<b>GSTIN</b>", styles["table_header"]),
+            Paragraph("<b>Commission Rate</b>", styles["table_header"]),
+            Paragraph("<b>Added On</b>", styles["table_header"]),
+        ]
+        rows = [header_row]
+        for c in clients:
+            rows.append([
+                Paragraph(c["name"], styles["table_cell"]),
+                Paragraph(c["gstin"], styles["table_cell"]),
+                Paragraph(f"{c['commission_rate'] * 100:.1f}%", styles["table_cell"]),
+                Paragraph(c["added_on"], styles["table_cell"]),
+            ])
+        t = Table(rows, colWidths=[col_w * 1.6, col_w * 1.2, col_w * 0.6, col_w * 0.6])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BRAND_PURPLE),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, LIGHT_GRAY]),
+            ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#CCCCCC")),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 16))
+
+    # Commissions table
+    if commissions:
+        story.append(Paragraph("Referral Commissions", styles["section_title"]))
+        story.append(Spacer(1, 6))
+        col_w = (PAGE_W - 2 * MARGIN) / 5
+        header_row = [
+            Paragraph("<b>Organisation</b>", styles["table_header"]),
+            Paragraph("<b>Amount</b>", styles["table_header"]),
+            Paragraph("<b>Rate</b>", styles["table_header"]),
+            Paragraph("<b>Status</b>", styles["table_header"]),
+            Paragraph("<b>Date</b>", styles["table_header"]),
+        ]
+        rows = [header_row]
+        for c in commissions:
+            status_color = BRAND_TEAL if c["status"] == "paid" else (AMBER if c["status"] == "pending" else DARK_GRAY)
+            rows.append([
+                Paragraph(c["org_name"][:30], styles["table_cell"]),
+                Paragraph(f"₹{c['amount']:,.2f}", styles["table_cell"]),
+                Paragraph(f"{c['rate'] * 100:.1f}%", styles["table_cell"]),
+                Paragraph(c["status"].upper(), ParagraphStyle(
+                    "status_cell",
+                    parent=styles["table_cell"],
+                    textColor=status_color,
+                    fontName="Helvetica-Bold",
+                )),
+                Paragraph(c["date"], styles["table_cell"]),
+            ])
+        t = Table(rows, colWidths=[col_w * 1.5, col_w * 0.8, col_w * 0.6, col_w * 0.7, col_w * 0.7] if False else [col_w] * 5)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BRAND_PURPLE),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, LIGHT_GRAY]),
+            ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#CCCCCC")),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(t)
+
+    doc.build(story)
+    return buf.getvalue()

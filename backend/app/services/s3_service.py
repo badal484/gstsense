@@ -1,5 +1,7 @@
 import asyncio
 import functools
+import os
+from pathlib import Path
 from typing import Any, Optional
 
 import boto3
@@ -22,6 +24,13 @@ S3_CONFIG = Config(
     read_timeout=60,
 )
 
+# Local storage root used when S3 is not available (development only)
+_LOCAL_STORAGE_ROOT = Path("/tmp/gstsense_local_storage")
+
+
+def _is_dev_mode() -> bool:
+    return settings.ENVIRONMENT == "development"
+
 
 def get_s3_client() -> Any:
     """Create boto3 S3 client configured for ap-south-1 Mumbai."""
@@ -35,7 +44,10 @@ def get_s3_client() -> Any:
 
 class S3Service:
     def __init__(self) -> None:
-        self.client = get_s3_client()
+        if not _is_dev_mode():
+            self.client = get_s3_client()
+        else:
+            self.client = None
         self.bucket = settings.AWS_S3_BUCKET
 
     # ------------------------------------------------------------------
@@ -46,6 +58,11 @@ class S3Service:
         """Offload synchronous boto3 call to the thread-pool executor."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+
+    def _local_path(self, s3_key: str) -> Path:
+        path = _LOCAL_STORAGE_ROOT / s3_key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
 
     # ------------------------------------------------------------------
     # Core operations
@@ -58,8 +75,14 @@ class S3Service:
         content_type: str = "application/octet-stream",
         metadata: Optional[dict] = None,
     ) -> str:
-        """Upload raw bytes to S3 and return the s3_key on success."""
+        """Upload raw bytes to S3 (or local disk in dev) and return the s3_key."""
         logger.info("s3_upload_started", s3_key=s3_key, file_size_bytes=len(file_bytes))
+
+        if _is_dev_mode():
+            self._local_path(s3_key).write_bytes(file_bytes)
+            logger.info("local_storage_upload_completed", s3_key=s3_key)
+            return s3_key
+
         extra_args: dict = {"ContentType": content_type}
         if metadata:
             extra_args["Metadata"] = {k: str(v) for k, v in metadata.items()}
@@ -82,13 +105,22 @@ class S3Service:
     async def download_file(self, s3_key: str) -> bytes:
         """Download an S3 object and return its raw bytes."""
         logger.info("s3_download_started", s3_key=s3_key)
+
+        if _is_dev_mode():
+            local = self._local_path(s3_key)
+            if not local.exists():
+                raise ExternalServiceError.storage_service_error()
+            data = local.read_bytes()
+            logger.info("local_storage_download_completed", s3_key=s3_key)
+            return data
+
         try:
             response = await self._run(
                 self.client.get_object,
                 Bucket=self.bucket,
                 Key=s3_key,
             )
-            data: bytes = response["Body"].read()
+            data = response["Body"].read()
         except ClientError as exc:
             error_code = exc.response["Error"]["Code"]
             logger.error("s3_download_failed", s3_key=s3_key, error_code=error_code)
@@ -103,7 +135,11 @@ class S3Service:
         expiry_seconds: int = 900,
         filename: Optional[str] = None,
     ) -> str:
-        """Return a presigned GET URL valid for *expiry_seconds* seconds."""
+        """Return a presigned GET URL (or local file:// path in dev)."""
+        if _is_dev_mode():
+            local = self._local_path(s3_key)
+            return f"file://{local}"
+
         params: dict = {"Bucket": self.bucket, "Key": s3_key}
         if filename:
             params["ResponseContentDisposition"] = (
@@ -125,6 +161,13 @@ class S3Service:
     async def delete_file(self, s3_key: str) -> bool:
         """Delete an S3 object. Returns True always (S3 delete is idempotent)."""
         logger.info("s3_delete_started", s3_key=s3_key)
+
+        if _is_dev_mode():
+            local = self._local_path(s3_key)
+            if local.exists():
+                local.unlink()
+            return True
+
         try:
             await self._run(
                 self.client.delete_object,
@@ -138,7 +181,10 @@ class S3Service:
             return False
 
     async def file_exists(self, s3_key: str) -> bool:
-        """Return True if the S3 key exists, False otherwise."""
+        """Return True if the key exists."""
+        if _is_dev_mode():
+            return self._local_path(s3_key).exists()
+
         try:
             await self._run(
                 self.client.head_object,

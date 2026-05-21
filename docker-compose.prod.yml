@@ -60,11 +60,25 @@ services:
   celery_beat:
     image: gstsense-backend:${IMAGE_TAG:-latest}
     restart: always
-    command: celery -A app.workers.celery_app beat --loglevel=warning
+    command: >
+      celery -A app.workers.celery_app beat
+      --loglevel=info
+      --scheduler celery.beat.PersistentScheduler
     env_file:
       - .env.prod
     depends_on:
       - redis
+    volumes: []
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
 
   frontend:
     image: gstsense-frontend:${IMAGE_TAG:-latest}

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, UploadFile, status
+from app.workers.scan_tasks import _process_scan_async
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -72,6 +73,7 @@ def _assert_scan_owner(scan: Optional[Scan], scan_id: uuid.UUID, org_id: uuid.UU
     description="Upload GSTR-1 and GSTR-3B Excel files to detect mismatches",
 )
 async def upload_scan(
+    background_tasks: BackgroundTasks,
     gstr1_file: UploadFile = File(..., description="GSTR-1 Excel file"),
     gstr3b_file: UploadFile = File(..., description="GSTR-3B Excel file"),
     scan_month: str = Form(
@@ -163,11 +165,14 @@ async def upload_scan(
         scan_month=scan_month,
     )
 
-    # ---- 10. Queue Celery task ----
-    process_scan_task.apply_async(
-        args=[str(scan_id), str(org.id)],
-        queue="normal",
-    )
+    # ---- 10. Queue task (direct background task in dev, Celery in prod) ----
+    if settings.is_development:
+        background_tasks.add_task(_process_scan_async, str(scan_id), str(org.id), "dev-task")
+    else:
+        process_scan_task.apply_async(
+            args=[str(scan_id), str(org.id)],
+            queue="normal",
+        )
 
     return make_response(
         ScanUploadResponse(
@@ -223,6 +228,15 @@ async def get_scan_preview(
             code="VAL_005",
         )
 
+    # Fetch first 3 mismatches for the free preview
+    preview_rows = await db.execute(
+        select(Mismatch)
+        .where(Mismatch.scan_id == scan_id)
+        .order_by(desc(Mismatch.rupee_difference))
+        .limit(3)
+    )
+    preview_mismatches = preview_rows.scalars().all()
+
     db.add(
         AuditLog(
             action="report_preview_viewed",
@@ -238,9 +252,11 @@ async def get_scan_preview(
         ScanPreviewResponse(
             scan_id=scan.id,
             total_mismatches=scan.total_mismatches,
+            total_invoices_scanned=scan.total_invoices_scanned,
             total_rupee_risk=scan.total_rupee_risk,
             is_paid=scan.is_paid,
             scan_month=scan.scan_month,
+            preview_mismatches=[MismatchResponse.model_validate(m) for m in preview_mismatches],
         )
     )
 
@@ -280,6 +296,8 @@ async def get_scan_report(
     )
     await db.commit()
 
+    unique_suppliers = len({m.supplier_gstin for m in mismatches})
+
     return make_response(
         ScanReportResponse(
             scan_id=scan.id,
@@ -287,6 +305,9 @@ async def get_scan_report(
             total_invoices_scanned=scan.total_invoices_scanned,
             total_mismatches=scan.total_mismatches,
             total_rupee_risk=scan.total_rupee_risk,
+            total_unique_suppliers=unique_suppliers,
+            created_at=scan.created_at,
+            warnings=[],
             mismatches=[MismatchResponse.model_validate(m) for m in mismatches],
         )
     )

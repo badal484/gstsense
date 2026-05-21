@@ -28,6 +28,37 @@ export const API_ROUTES = {
     ME: "/api/v1/organizations/me",
     STATS: "/api/v1/organizations/me/stats",
   },
+  ITC: {
+    UPLOAD: "/api/v1/itc/upload",
+    SUMMARY: "/api/v1/itc/summary/latest",
+    STATUS: (id: string) => `/api/v1/itc/${id}/status`,
+    ANALYSIS: (id: string) => `/api/v1/itc/${id}/analysis`,
+    LIST: "/api/v1/itc/",
+  },
+  NOTICES: {
+    UPLOAD: "/api/v1/notices/upload",
+    LIST: "/api/v1/notices/",
+    DETAIL: (id: string) => `/api/v1/notices/${id}`,
+    DRAFT: (id: string) => `/api/v1/notices/${id}/draft`,
+    VERIFY: (id: string) => `/api/v1/notices/${id}/verify-credentials`,
+    DOWNLOAD: (id: string) => `/api/v1/notices/${id}/download`,
+    APPROVE: (id: string) => `/api/v1/notices/${id}/approve`,
+    SHARE: (id: string) => `/api/v1/notices/${id}/share`,
+  },
+  DASHBOARD: "/api/v1/dashboard/",
+  CA_FIRMS: {
+    REGISTER: "/api/v1/ca-firms/",
+    ME: "/api/v1/ca-firms/me",
+    UPDATE: "/api/v1/ca-firms/me",
+    DASHBOARD: "/api/v1/ca-firms/me/dashboard",
+    REPORT: "/api/v1/ca-firms/me/report",
+    CLIENTS: "/api/v1/ca-firms/clients",
+    CLIENT: (orgId: string) => `/api/v1/ca-firms/clients/${orgId}`,
+    COMMISSIONS: "/api/v1/ca-firms/commissions",
+    COMMISSION_SUMMARY: "/api/v1/ca-firms/commissions/summary",
+    MARK_PAID: (id: string) => `/api/v1/ca-firms/commissions/${id}/mark-paid`,
+    BRANDING: (subdomain: string) => `/api/v1/ca-firms/branding/${subdomain}`,
+  },
 } as const
 
 export const ROUTES = {
@@ -39,6 +70,13 @@ export const ROUTES = {
   SCAN_PROCESSING: "/scan/processing",
   SCAN_PREVIEW: "/scan/preview",
   SCAN_REPORT: (id: string) => `/scan/report/${id}`,
+  ITC: "/itc",
+  ITC_DETAIL: (id: string) => `/itc/${id}`,
+  NOTICES: "/notices",
+  NOTICE_DETAIL: (id: string) => `/notices/${id}`,
+  CA: "/ca",
+  CA_CLIENTS: "/ca/clients",
+  CA_COMMISSIONS: "/ca/commissions",
   SETTINGS: "/settings",
 } as const
 

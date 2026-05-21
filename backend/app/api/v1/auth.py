@@ -1,6 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Request, status
+from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -10,7 +11,9 @@ from app.api.deps import (
     get_user_agent,
 )
 from app.core.config import settings
-from app.core.security import create_access_token, create_refresh_token
+from app.core.exceptions import AuthenticationError, ValidationError
+from app.core.security import create_access_token, create_refresh_token, hash_password, verify_password
+from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.schemas.auth import (
     AuthResponse,
@@ -23,6 +26,7 @@ from app.schemas.auth import (
     TokenResponse,
     UserResponse,
     UserWithOrgResponse,
+    _validate_password,
 )
 from app.schemas.common import ApiResponse, make_response
 from app.services.auth_service import AuthService
@@ -250,3 +254,84 @@ async def reset_password(
         new_password=request_body.new_password,
     )
     return make_response({"message": "Password reset successfully. Please log in."})
+
+
+# ---------------------------------------------------------------------------
+# Change password (authenticated)
+# ---------------------------------------------------------------------------
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        return _validate_password(v)
+
+
+@router.post(
+    "/change-password",
+    response_model=ApiResponse[dict],
+    status_code=status.HTTP_200_OK,
+    summary="Change password",
+)
+async def change_password(
+    request_body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[dict]:
+    if not verify_password(request_body.current_password, current_user.hashed_password):
+        raise AuthenticationError.invalid_credentials()
+
+    current_user.hashed_password = hash_password(request_body.new_password)
+    db.add(AuditLog(action="password_changed", user_id=current_user.id))
+    await db.commit()
+    return make_response({"message": "Password changed successfully."})
+
+
+# ---------------------------------------------------------------------------
+# Update profile (authenticated)
+# ---------------------------------------------------------------------------
+
+class UpdateProfileRequest(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip()
+            if len(v) < 2 or len(v) > 100:
+                raise ValueError("full_name must be between 2 and 100 characters")
+        return v
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > 20:
+            raise ValueError("phone must be at most 20 characters")
+        return v
+
+
+@router.patch(
+    "/me",
+    response_model=ApiResponse[UserResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Update profile",
+)
+async def update_profile(
+    request_body: UpdateProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[UserResponse]:
+    if request_body.full_name is not None:
+        current_user.full_name = request_body.full_name
+    if request_body.phone is not None:
+        current_user.phone = request_body.phone if request_body.phone else None
+
+    db.add(AuditLog(action="profile_updated", user_id=current_user.id))
+    await db.commit()
+    await db.refresh(current_user)
+    return make_response(UserResponse.model_validate(current_user))

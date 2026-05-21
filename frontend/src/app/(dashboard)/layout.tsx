@@ -12,6 +12,9 @@ import {
   Menu,
   X,
   ChevronRight,
+  ShieldCheck,
+  Bell,
+  Building2,
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { ROUTES } from "@/lib/constants";
@@ -27,6 +30,9 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: ROUTES.DASHBOARD, label: "Dashboard", icon: <LayoutDashboard className="w-5 h-5" /> },
   { href: ROUTES.SCAN, label: "New Scan", icon: <Upload className="w-5 h-5" /> },
+  { href: ROUTES.ITC, label: "ITC Recovery", icon: <ShieldCheck className="w-5 h-5" /> },
+  { href: ROUTES.NOTICES, label: "Notice Reply", icon: <Bell className="w-5 h-5" /> },
+  { href: ROUTES.CA, label: "CA Firm", icon: <Building2 className="w-5 h-5" /> },
 ];
 
 function SidebarContent({ onClose }: { onClose?: () => void }) {
@@ -112,7 +118,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    initialize();
+    initialize().catch(() => {});
   }, [initialize]);
 
   useEffect(() => {

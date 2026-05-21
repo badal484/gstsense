@@ -1,10 +1,10 @@
 import enum
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Date, Enum, ForeignKey, Index, Numeric, String, Text
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, JSON, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
@@ -16,9 +16,14 @@ if TYPE_CHECKING:
 
 class NoticeType(str, enum.Enum):
     DRC_01 = "DRC_01"
+    DRC_01A = "DRC_01A"
     DRC_01C = "DRC_01C"
     DRC_07 = "DRC_07"
     DRC_10 = "DRC_10"
+    ASMT_10 = "ASMT_10"
+    ASMT_11 = "ASMT_11"
+    REG_03 = "REG_03"
+    REG_17 = "REG_17"
     other = "other"
 
 
@@ -85,6 +90,21 @@ class Notice(Base, UUIDMixin, TimestampMixin):
     # Required before the approved draft can be downloaded.
     icai_membership_number: Mapped[Optional[str]] = mapped_column(
         String(20),
+        nullable=True,
+    )
+    # Warnings from citation validation step
+    draft_warnings: Mapped[Optional[list[Any]]] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+    # Secure share token (stored as SHA-256 hash)
+    share_token: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+    share_token_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
 

@@ -28,10 +28,13 @@ export default function LoginPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!validate()) return;
-    await login(email.trim(), password);
-    const state = useAuthStore.getState();
-    if (state.isAuthenticated) {
-      router.push(ROUTES.DASHBOARD);
+    try {
+      await login(email.trim(), password);
+      if (useAuthStore.getState().isAuthenticated) {
+        router.push(ROUTES.DASHBOARD);
+      }
+    } catch {
+      // error is already set in the store by login()
     }
   }
 

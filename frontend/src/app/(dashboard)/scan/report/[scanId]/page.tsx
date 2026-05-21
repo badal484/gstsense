@@ -119,7 +119,14 @@ export default function ReportPage() {
     if (!scanId) return;
     setDownloading(true);
     try {
-      await scanApi.downloadReport(scanId);
+      const data = await scanApi.downloadReport(scanId);
+      if (data?.download_url?.startsWith("http")) {
+        window.open(data.download_url, "_blank");
+      } else {
+        alert("PDF download requires AWS S3 setup (available after deployment). Your full report is shown on this page.");
+      }
+    } catch {
+      alert("PDF generation is not available in local development mode.");
     } finally {
       setDownloading(false);
     }
@@ -273,11 +280,11 @@ export default function ReportPage() {
         </div>
       )}
 
-      {report.warnings.length > 0 && (
+      {(report.warnings ?? []).length > 0 && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
           <h3 className="text-sm font-semibold text-yellow-800 mb-2">Processing Notes</h3>
           <ul className="space-y-1">
-            {report.warnings.map((w, i) => (
+            {(report.warnings ?? []).map((w, i) => (
               <li key={i} className="text-xs text-yellow-700 flex items-start gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {w}
               </li>

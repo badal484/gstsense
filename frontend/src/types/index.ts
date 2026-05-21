@@ -65,6 +65,7 @@ export interface Scan {
   created_at: string
   completed_at: string | null
   processing_duration_seconds: number | null
+  error_message: string | null
 }
 
 export interface ScanPreview {
@@ -91,8 +92,8 @@ export interface ScanReport {
 
 export interface UsageStats {
   total_scans: number
-  total_mismatches: number
-  total_rupee_risk: string
+  total_mismatches_found: number
+  total_rupee_risk_found: string
   scans_this_month: number
   invoices_used_this_month: number
   invoice_limit: number

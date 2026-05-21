@@ -34,7 +34,12 @@ TEST_DB_URL = (
 # Tables to truncate between tests (dependency order — children first)
 _TRUNCATE_TABLES = [
     "audit_logs",
+    "user_preferences",
+    "compliance_scores",
     "mismatches",
+    "referral_commissions",
+    "ca_client_relationships",
+    "ca_firms",
     "payments",
     "scans",
     "subscriptions",

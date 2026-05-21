@@ -7,7 +7,12 @@ celery_app = Celery(
     "gstsense",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.workers.scan_tasks"],
+    include=[
+        "app.workers.scan_tasks",
+        "app.workers.itc_tasks",
+        "app.workers.notice_tasks",
+        "app.workers.scheduler",
+    ],
 )
 
 celery_app.conf.update(
@@ -24,6 +29,12 @@ celery_app.conf.update(
     task_default_queue="normal",
     task_routes={
         "app.workers.scan_tasks.process_scan_task": {"queue": "normal"},
+        "app.workers.itc_tasks.process_itc_task": {"queue": "normal"},
+        "app.workers.notice_tasks.generate_notice_draft_task": {"queue": "normal"},
+        "app.workers.scheduler.send_filing_reminders": {"queue": "low"},
+        "app.workers.scheduler.reset_invoice_counts": {"queue": "low"},
+        "app.workers.scheduler.update_compliance_scores": {"queue": "low"},
+        "app.workers.scheduler.process_monthly_payouts": {"queue": "low"},
     },
     worker_max_tasks_per_child=50,
     task_soft_time_limit=240,

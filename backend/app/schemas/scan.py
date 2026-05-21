@@ -43,9 +43,11 @@ class ScanStatusResponse(BaseModel):
 class ScanPreviewResponse(BaseModel):
     scan_id: uuid.UUID
     total_mismatches: int
+    total_invoices_scanned: int
     total_rupee_risk: Decimal
     is_paid: bool
     scan_month: str
+    preview_mismatches: list["MismatchResponse"] = []
 
     model_config = {"from_attributes": True}
 
@@ -87,6 +89,9 @@ class ScanReportResponse(BaseModel):
     total_invoices_scanned: int
     total_mismatches: int
     total_rupee_risk: Decimal
+    total_unique_suppliers: int = 0
+    created_at: Optional[datetime] = None
+    warnings: list[str] = []
     mismatches: list[MismatchResponse]
 
     model_config = {"from_attributes": True}

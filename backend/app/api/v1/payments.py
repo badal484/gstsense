@@ -32,6 +32,7 @@ from app.schemas.payment import (
     VerifyPaymentRequest,
     VerifyPaymentResponse,
 )
+from app.services.referral_service import process_payment_commission
 
 logger = get_logger(__name__)
 
@@ -218,6 +219,9 @@ async def verify_payment(
             "scan_id": str(request_body.scan_id),
         },
     ))
+
+    # 7. Process referral commission if org has an active CA firm relationship
+    await process_payment_commission(db, payment)
 
     await db.commit()
     logger.info(

@@ -27,6 +27,8 @@ export const tokenStorage = {
   },
   setToken: (token: string): void => {
     localStorage.setItem(TOKEN_KEY, token)
+    // Write cookie so Next.js middleware can gate dashboard routes
+    document.cookie = `access_token=${token}; path=/; max-age=900; SameSite=Lax`
   },
   getRefreshToken: (): string | null => {
     if (typeof window === "undefined") return null
@@ -38,6 +40,7 @@ export const tokenStorage = {
   clearAll: (): void => {
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(REFRESH_TOKEN_KEY)
+    document.cookie = "access_token=; path=/; max-age=0; SameSite=Lax"
   },
 }
 
@@ -211,14 +214,11 @@ export const scanApi = {
   ): Promise<AxiosResponse<ApiResponse<ScanReport>>> =>
     api.get(API_ROUTES.SCANS.REPORT(scanId)),
 
-  downloadReport: async (scanId: string): Promise<void> => {
-    const resp = await api.get<{ download_url: string }>(
+  downloadReport: async (scanId: string): Promise<{ download_url?: string }> => {
+    const resp = await api.get<{ download_url?: string }>(
       API_ROUTES.SCANS.DOWNLOAD(scanId),
     )
-    const url = resp.data.download_url
-    if (url && typeof window !== "undefined") {
-      window.open(url, "_blank")
-    }
+    return resp.data
   },
 
   listScans: (

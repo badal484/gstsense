@@ -81,10 +81,13 @@ export default function SignupPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!validate()) return;
-    await register(fullName.trim(), email.trim(), password, gstin.trim());
-    const state = useAuthStore.getState();
-    if (state.isAuthenticated) {
-      router.push(ROUTES.DASHBOARD);
+    try {
+      await register(fullName.trim(), email.trim(), password, gstin.trim());
+      if (useAuthStore.getState().isAuthenticated) {
+        router.push(ROUTES.DASHBOARD);
+      }
+    } catch {
+      // error is already set in the store by register()
     }
   }
 

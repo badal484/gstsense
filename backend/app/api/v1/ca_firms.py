@@ -301,9 +301,9 @@ async def add_client(
 ) -> ApiResponse[CAClientResponse]:
     ca_firm = await _get_ca_firm_or_404(db, current_user.id)
 
-    # Find the organization by GSTIN
+    # Find the organization by GSTIN (case-insensitive)
     org_q = await db.execute(
-        select(Organization).where(Organization.gstin == body.gstin)
+        select(Organization).where(func.upper(Organization.gstin) == body.gstin.upper())
     )
     client_org = org_q.scalar_one_or_none()
     if client_org is None:
@@ -673,12 +673,163 @@ async def get_branding(
             message=f"No CA firm found for subdomain '{subdomain}'.",
             code="NF_CA_005",
         )
+    logo_url: Optional[str] = None
+    if ca_firm.logo_s3_key:
+        from app.services.s3_service import s3_service
+        logo_url = await s3_service.generate_presigned_url(
+            s3_key=ca_firm.logo_s3_key,
+            expiry_seconds=3600,
+        )
     return make_response(BrandingResponse(
         firm_name=ca_firm.firm_name,
-        primary_ca_name=ca_firm.primary_ca_name,
+        ca_name=ca_firm.primary_ca_name,
         city=ca_firm.city,
         state=ca_firm.state,
         primary_color=ca_firm.primary_color,
-        logo_s3_key=ca_firm.logo_s3_key,
+        logo_url=logo_url,
         white_label_subdomain=ca_firm.white_label_subdomain or "",
+    ))
+
+
+# ---------------------------------------------------------------------------
+# Bank Details endpoints
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel as _BM
+from app.models.bank_details import CABankDetails
+
+
+class BankDetailsRequest(_BM):
+    account_holder_name: str
+    account_number: str
+    ifsc_code: str
+    bank_name: str
+    upi_id: Optional[str] = None
+
+
+class BankDetailsResponse(_BM):
+    account_holder_name: str
+    account_number_masked: str
+    ifsc_code: str
+    bank_name: str
+    upi_id: Optional[str]
+
+    model_config = {"from_attributes": True}
+
+
+@router.post(
+    "/me/bank-details",
+    response_model=ApiResponse[BankDetailsResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Add bank details for CA firm payouts",
+)
+async def create_bank_details(
+    body: BankDetailsRequest,
+    current_user: User = Depends(get_current_user),
+    org: Organization = Depends(require_plan("ca_firm")),
+    db: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[BankDetailsResponse]:
+    ca_firm = await _get_ca_firm_or_404(db, current_user.id)
+
+    existing = await db.execute(
+        select(CABankDetails).where(CABankDetails.ca_firm_id == ca_firm.id)
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise ConflictError(
+            message="Bank details already exist. Use PATCH to update.",
+            code="CF_BANK_001",
+        )
+
+    record = CABankDetails(
+        ca_firm_id=ca_firm.id,
+        account_holder_name=body.account_holder_name,
+        account_number=body.account_number,
+        ifsc_code=body.ifsc_code.upper(),
+        bank_name=body.bank_name,
+        upi_id=body.upi_id,
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+
+    return make_response(BankDetailsResponse(
+        account_holder_name=record.account_holder_name,
+        account_number_masked="*" * (len(record.account_number) - 4) + record.account_number[-4:],
+        ifsc_code=record.ifsc_code,
+        bank_name=record.bank_name,
+        upi_id=record.upi_id,
+    ))
+
+
+@router.patch(
+    "/me/bank-details",
+    response_model=ApiResponse[BankDetailsResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Update bank details",
+)
+async def update_bank_details(
+    body: BankDetailsRequest,
+    current_user: User = Depends(get_current_user),
+    org: Organization = Depends(require_plan("ca_firm")),
+    db: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[BankDetailsResponse]:
+    ca_firm = await _get_ca_firm_or_404(db, current_user.id)
+
+    result = await db.execute(
+        select(CABankDetails).where(CABankDetails.ca_firm_id == ca_firm.id)
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise NotFoundError(
+            message="No bank details found. Use POST to create.",
+            code="NF_BANK_001",
+        )
+
+    record.account_holder_name = body.account_holder_name
+    record.account_number = body.account_number
+    record.ifsc_code = body.ifsc_code.upper()
+    record.bank_name = body.bank_name
+    record.upi_id = body.upi_id
+
+    await db.commit()
+    await db.refresh(record)
+
+    return make_response(BankDetailsResponse(
+        account_holder_name=record.account_holder_name,
+        account_number_masked="*" * (len(record.account_number) - 4) + record.account_number[-4:],
+        ifsc_code=record.ifsc_code,
+        bank_name=record.bank_name,
+        upi_id=record.upi_id,
+    ))
+
+
+@router.get(
+    "/me/bank-details",
+    response_model=ApiResponse[BankDetailsResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Get bank details (masked)",
+)
+async def get_bank_details(
+    current_user: User = Depends(get_current_user),
+    org: Organization = Depends(require_plan("ca_firm")),
+    db: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[BankDetailsResponse]:
+    ca_firm = await _get_ca_firm_or_404(db, current_user.id)
+
+    result = await db.execute(
+        select(CABankDetails).where(CABankDetails.ca_firm_id == ca_firm.id)
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise NotFoundError(
+            message="No bank details found.",
+            code="NF_BANK_001",
+        )
+
+    return make_response(BankDetailsResponse(
+        account_holder_name=record.account_holder_name,
+        account_number_masked="*" * (len(record.account_number) - 4) + record.account_number[-4:],
+        ifsc_code=record.ifsc_code,
+        bank_name=record.bank_name,
+        upi_id=record.upi_id,
     ))

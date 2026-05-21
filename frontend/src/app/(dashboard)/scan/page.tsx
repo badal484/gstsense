@@ -5,6 +5,8 @@ import { useDropzone } from "react-dropzone";
 import { Upload, FileSpreadsheet, X, CheckCircle, Loader2, AlertCircle } from "lucide-react";
 import { useScanUpload } from "@/hooks/useScan";
 import { useScanStore } from "@/store/scanStore";
+import { useAuthStore } from "@/store/authStore";
+import { trackEvent } from "@/lib/analytics";
 import { MAX_FILE_SIZE_BYTES, ACCEPTED_FILE_TYPES } from "@/lib/constants";
 
 const MAX_SIZE_MB = MAX_FILE_SIZE_BYTES / 1024 / 1024;
@@ -110,6 +112,7 @@ function FileDropZone({
 export default function ScanPage() {
   const { upload } = useScanUpload();
   const { isUploading: isLoading, uploadError: error } = useScanStore();
+  const { organization } = useAuthStore();
 
   const [gstr1, setGstr1] = useState<FileState>({ file: null, error: null });
   const [gstr3b, setGstr3b] = useState<FileState>({ file: null, error: null });
@@ -135,6 +138,7 @@ export default function ScanPage() {
   async function handleSubmit() {
     if (!gstr1.file || !gstr3b.file) return;
     await upload(gstr1.file, gstr3b.file);
+    trackEvent("scan_uploaded", { org_id: organization?.id, plan: organization?.plan });
   }
 
   return (

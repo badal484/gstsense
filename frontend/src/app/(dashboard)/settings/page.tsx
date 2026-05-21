@@ -171,63 +171,67 @@ function ProfileTab({ user, org }: { user: UserType; org: Organization }) {
 
 // ── Notifications Tab ─────────────────────────────────────────────────────────
 type NotifPrefs = {
-  whatsapp_deadlines: boolean;
+  whatsapp_deadline_reminders: boolean;
+  whatsapp_scan_complete: boolean;
   email_scan_complete: boolean;
-  email_mismatch_alerts: boolean;
-  email_payment_receipts: boolean;
+  email_weekly_digest: boolean;
 };
 
 function NotificationsTab() {
   const [prefs, setPrefs] = useState<NotifPrefs>({
-    whatsapp_deadlines: true,
+    whatsapp_deadline_reminders: true,
+    whatsapp_scan_complete: true,
     email_scan_complete: true,
-    email_mismatch_alerts: true,
-    email_payment_receipts: true,
+    email_weekly_digest: false,
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  function toggle(key: keyof NotifPrefs) {
-    setPrefs((p) => ({ ...p, [key]: !p[key] }));
-  }
+  useEffect(() => {
+    api.get("/api/v1/preferences/").then((r) => {
+      const data = r.data?.data ?? {};
+      setPrefs((p) => ({ ...p, ...data }));
+    }).catch(() => {});
+  }, []);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleToggle(key: keyof NotifPrefs, value: boolean) {
+    setPrefs((p) => ({ ...p, [key]: value }));
     setSaving(true);
-    setSaved(false);
     try {
-      await api.patch("/api/v1/users/notification-preferences", prefs);
+      await api.patch("/api/v1/preferences/", { [key]: value });
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      setTimeout(() => setSaved(false), 1500);
     } catch {
-      // preferences endpoint may not exist yet — save locally
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      setPrefs((p) => ({ ...p, [key]: !value }));
     } finally {
       setSaving(false);
     }
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+  }
+
   const rows: { key: keyof NotifPrefs; label: string; desc: string }[] = [
     {
-      key: "whatsapp_deadlines",
+      key: "whatsapp_deadline_reminders",
       label: "WhatsApp Deadline Reminders",
       desc: "Receive filing deadline reminders via WhatsApp (requires phone number).",
     },
     {
+      key: "whatsapp_scan_complete",
+      label: "WhatsApp Scan Alerts",
+      desc: "WhatsApp message when your scan is complete.",
+    },
+    {
       key: "email_scan_complete",
-      label: "Scan Completed",
+      label: "Scan Completed Email",
       desc: "Email when your GST reconciliation scan finishes.",
     },
     {
-      key: "email_mismatch_alerts",
-      label: "High-Risk Mismatch Alerts",
-      desc: "Email when mismatches above ₹1 lakh are detected.",
-    },
-    {
-      key: "email_payment_receipts",
-      label: "Payment Receipts",
-      desc: "Email receipts for every payment made on GSTSense.",
+      key: "email_weekly_digest",
+      label: "Weekly Digest",
+      desc: "Weekly summary of your compliance health and pending actions.",
     },
   ];
 
@@ -243,11 +247,13 @@ function NotificationsTab() {
               <p className="text-sm font-medium text-gray-800">{r.label}</p>
               <p className="text-xs text-gray-500 mt-0.5">{r.desc}</p>
             </div>
-            <Toggle checked={prefs[r.key]} onChange={() => toggle(r.key)} />
+            <Toggle checked={prefs[r.key]} onChange={(v) => handleToggle(r.key, v)} />
           </div>
         ))}
       </div>
-      <SaveButton saving={saving} saved={saved} />
+      {(saving || saved) && (
+        <p className="text-xs text-gray-500">{saving ? "Saving…" : "Saved!"}</p>
+      )}
     </form>
   );
 }
@@ -319,7 +325,7 @@ function SecurityTab() {
     if (deleteConfirm !== "DELETE") return;
     setDeleting(true);
     try {
-      await api.delete("/api/v1/users/me");
+      await api.delete("/api/v1/auth/me", { data: { confirmation: "DELETE" } });
       logout();
     } catch {
       setDeleting(false);

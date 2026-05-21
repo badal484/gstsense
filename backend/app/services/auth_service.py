@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -25,6 +25,7 @@ from app.core.security import (
 )
 from app.models.audit_log import AuditLog
 from app.models.organization import Organization, Plan
+from app.models.refresh_token import RefreshToken
 from app.models.user import AccountType, User
 from app.schemas.auth import LoginRequest, RegisterRequest
 from app.services.email_service import send_password_reset_email
@@ -61,9 +62,11 @@ class AuthService:
         if existing.scalar_one_or_none() is not None:
             raise ConflictError.email_already_registered(request.email)
 
-        # 2. GSTIN uniqueness
+        # 2. GSTIN uniqueness (case-insensitive)
         existing_org = await self.db.execute(
-            select(Organization).where(Organization.gstin == request.gstin)
+            select(Organization).where(
+                func.upper(Organization.gstin) == request.gstin.upper()
+            )
         )
         if existing_org.scalar_one_or_none() is not None:
             raise ConflictError.gstin_already_registered(request.gstin)
@@ -205,12 +208,30 @@ class AuthService:
     # Token refresh
     # ------------------------------------------------------------------
 
+    async def store_refresh_token(self, user_id: uuid.UUID, token: str) -> None:
+        """Decode a refresh token and persist its jti for revocation tracking."""
+        payload = verify_refresh_token(token)
+        record = RefreshToken(
+            jti=payload.jti,
+            user_id=user_id,
+            expires_at=payload.exp,
+        )
+        self.db.add(record)
+
     async def refresh_tokens(
         self,
         refresh_token: str,
     ) -> tuple[str, str]:
         """Validate a refresh token and issue a new token pair (rotation)."""
         payload = verify_refresh_token(refresh_token)
+
+        # Check revocation in DB
+        rt_result = await self.db.execute(
+            select(RefreshToken).where(RefreshToken.jti == payload.jti)
+        )
+        rt_record = rt_result.scalar_one_or_none()
+        if rt_record is not None and rt_record.revoked_at is not None:
+            raise AuthenticationError.token_invalid()
 
         result = await self.db.execute(
             select(User).where(User.id == uuid.UUID(payload.sub))
@@ -219,6 +240,10 @@ class AuthService:
 
         if user is None or not user.is_active:
             raise AuthenticationError.token_invalid()
+
+        # Revoke old token
+        if rt_record is not None:
+            rt_record.revoked_at = datetime.now(tz=timezone.utc)
 
         # Fetch org to embed org_id in the new access token
         org_result = await self.db.execute(
@@ -233,6 +258,20 @@ class AuthService:
             role=user.account_type.value,
         )
         new_refresh = create_refresh_token(user_id=str(user.id))
+
+        # Store new refresh token record
+        new_payload = verify_refresh_token(new_refresh)
+        self.db.add(RefreshToken(
+            jti=new_payload.jti,
+            user_id=user.id,
+            expires_at=new_payload.exp,
+        ))
+
+        # Purge expired tokens older than 60 days
+        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=60)
+        await self.db.execute(
+            delete(RefreshToken).where(RefreshToken.expires_at < cutoff)
+        )
 
         logger.info("tokens_refreshed", user_id=str(user.id))
         return new_access, new_refresh

@@ -1,3 +1,5 @@
+import os
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -27,6 +29,8 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ---- Startup ----
+    os.environ.setdefault("TZ", "Asia/Kolkata")
+    time.tzset()
     setup_logging()
 
     if settings.SENTRY_DSN:

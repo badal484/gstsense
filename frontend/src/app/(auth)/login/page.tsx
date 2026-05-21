@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FileSpreadsheet, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
+import { trackEvent } from "@/lib/analytics";
 import { ROUTES } from "@/lib/constants";
 
 export default function LoginPage() {
@@ -31,6 +32,7 @@ export default function LoginPage() {
     try {
       await login(email.trim(), password);
       if (useAuthStore.getState().isAuthenticated) {
+        trackEvent("login_completed");
         router.push(ROUTES.DASHBOARD);
       }
     } catch {

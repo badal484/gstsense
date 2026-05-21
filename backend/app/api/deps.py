@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db, set_rls_context
 from app.core.exceptions import AuthenticationError, AuthorizationError, NotFoundError
 from app.core.logging import get_logger
-from app.core.security import verify_access_token
+from app.core.security import is_user_blocked, verify_access_token
 from app.models.organization import Organization
 from app.models.user import AccountType, User
 
@@ -67,6 +67,9 @@ async def get_current_user(
 
     if not user.is_active:
         raise AuthenticationError.invalid_credentials()
+
+    if await is_user_blocked(str(user.id)):
+        raise AuthenticationError(message="Account has been deleted.", code="AUTH_005")
 
     # Set PostgreSQL session variables so RLS policies can read them.
     await set_rls_context(db, user_id=str(user.id), org_id=payload.org_id)

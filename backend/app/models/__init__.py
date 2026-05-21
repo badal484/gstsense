@@ -13,7 +13,9 @@ from app.models.notice import DraftStatus, Notice, NoticeType
 from app.models.organization import Organization, Plan, SubscriptionStatus
 from app.models.payment import Payment, PaymentStatus, PaymentType
 from app.models.scan import Scan, ScanStatus
+from app.models.bank_details import CABankDetails
 from app.models.compliance_score import ComplianceScoreRecord
+from app.models.refresh_token import RefreshToken
 from app.models.subscription import Subscription, SubscriptionPlan
 from app.models.user import AccountType, User
 from app.models.user_preferences import UserPreferences
@@ -61,6 +63,10 @@ __all__ = [
     "ComplianceScoreRecord",
     # User Preferences
     "UserPreferences",
+    # Refresh Tokens
+    "RefreshToken",
+    # Bank Details
+    "CABankDetails",
     # Audit
     "AuditLog",
 ]

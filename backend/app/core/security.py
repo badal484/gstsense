@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, cast
 
 import bcrypt
+import redis.asyncio as aioredis
 from jose import ExpiredSignatureError, JWTError, jwt
 from pydantic import BaseModel
 
@@ -253,6 +254,36 @@ def verify_razorpay_payment_signature(
             payment_id=payment_id,
         )
     return valid
+
+
+# ---------------------------------------------------------------------------
+# User blocklist (Redis) — for immediate token invalidation on account delete
+# ---------------------------------------------------------------------------
+
+
+async def add_user_to_blocklist(user_id: str) -> None:
+    """Block all tokens for user_id. TTL = access token lifetime."""
+    r = aioredis.from_url(settings.REDIS_URL)
+    try:
+        await r.setex(
+            f"blocked_user:{user_id}",
+            settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "1",
+        )
+    finally:
+        await r.aclose()
+
+
+async def is_user_blocked(user_id: str) -> bool:
+    """Return True if the user is in the blocklist."""
+    r = aioredis.from_url(settings.REDIS_URL)
+    try:
+        result = await r.get(f"blocked_user:{user_id}")
+        return result is not None
+    except Exception:
+        return False
+    finally:
+        await r.aclose()
 
 
 # ---------------------------------------------------------------------------

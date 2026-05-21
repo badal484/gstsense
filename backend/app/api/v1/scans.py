@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, UploadFile, status
 from app.workers.scan_tasks import _process_scan_async
 from sqlalchemy import desc, func, select
@@ -193,8 +194,27 @@ async def get_scan_status(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[ScanStatusResponse]:
-    result = await db.execute(select(Scan).where(Scan.id == scan_id))
-    scan = _assert_scan_owner(result.scalar_one_or_none(), scan_id, org.id)
+    cache_key = f"scan_status:{scan_id}"
+    r = aioredis.from_url(settings.REDIS_URL)
+    try:
+        cached_status = await r.get(cache_key)
+    except Exception:
+        cached_status = None
+    finally:
+        await r.aclose()
+
+    if cached_status:
+        result = await db.execute(select(Scan).where(Scan.id == scan_id))
+        scan = _assert_scan_owner(result.scalar_one_or_none(), scan_id, org.id)
+    else:
+        result = await db.execute(select(Scan).where(Scan.id == scan_id))
+        scan = _assert_scan_owner(result.scalar_one_or_none(), scan_id, org.id)
+        try:
+            r2 = aioredis.from_url(settings.REDIS_URL)
+            await r2.setex(cache_key, 2, scan.status.value)
+            await r2.aclose()
+        except Exception:
+            pass
 
     return make_response(
         ScanStatusResponse(

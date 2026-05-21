@@ -252,4 +252,49 @@ export const orgApi = {
     api.get(API_ROUTES.ORGANIZATIONS.STATS),
 }
 
+export const subscriptionApi = {
+  create: (plan: string): Promise<AxiosResponse<ApiResponse<{
+    id: string; plan: string; status: string;
+    razorpay_subscription_id: string | null;
+    current_period_start: string; current_period_end: string;
+    amount_paise: number;
+  }>>> => api.post("/api/v1/subscriptions/create", { plan }),
+
+  getCurrent: (): Promise<AxiosResponse<ApiResponse<null | {
+    id: string; plan: string; status: string;
+    razorpay_subscription_id: string | null;
+    current_period_start: string; current_period_end: string;
+  }>>> => api.get("/api/v1/subscriptions/current"),
+
+  cancel: (): Promise<AxiosResponse<ApiResponse<{ message: string; access_until: string }>>> =>
+    api.post("/api/v1/subscriptions/cancel"),
+}
+
+export const userApi = {
+  updateProfile: (data: {
+    full_name?: string;
+    phone?: string;
+  }): Promise<AxiosResponse<ApiResponse<{ id: string; full_name: string; email: string }>>> =>
+    api.patch("/api/v1/auth/me", data),
+
+  changePassword: (data: {
+    current_password: string;
+    new_password: string;
+  }): Promise<AxiosResponse<ApiResponse<{ message: string }>>> =>
+    api.post("/api/v1/auth/change-password", data),
+
+  deleteAccount: (
+    confirmation: string,
+  ): Promise<AxiosResponse<ApiResponse<{ message: string }>>> =>
+    api.delete("/api/v1/auth/me", { data: { confirmation } }),
+
+  getPreferences: (): Promise<AxiosResponse<ApiResponse<Record<string, boolean>>>> =>
+    api.get("/api/v1/preferences/"),
+
+  updatePreferences: (
+    data: Record<string, boolean>,
+  ): Promise<AxiosResponse<ApiResponse<Record<string, boolean>>>> =>
+    api.patch("/api/v1/preferences/", data),
+}
+
 export default api

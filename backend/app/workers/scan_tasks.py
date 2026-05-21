@@ -6,7 +6,7 @@ from decimal import Decimal
 from celery import Task
 from sqlalchemy import select, update
 
-from app.core.database import AsyncSessionLocal
+from app.core.database import celery_db_session
 from app.core.logging import get_logger
 from app.models.audit_log import AuditLog
 from app.models.mismatch import Mismatch
@@ -20,7 +20,7 @@ from app.workers.celery_app import celery_app
 logger = get_logger(__name__)
 
 
-from typing import Any
+from typing import Any, Optional
 
 def run_async(coro: Any) -> Any:
     """Run an async coroutine from a sync Celery task using a fresh event loop."""
@@ -55,7 +55,7 @@ def process_scan_task(self: Task, scan_id: str, org_id: str) -> Any:
 
 async def _mark_scan_failed(scan_id: str, error_message: str) -> None:
     """Update scan status to failed in a dedicated session."""
-    async with AsyncSessionLocal() as db:
+    async with celery_db_session() as db:
         await db.execute(
             update(Scan)
             .where(Scan.id == uuid.UUID(scan_id))
@@ -76,7 +76,7 @@ async def _process_scan_async(
     """Async implementation of the full scan pipeline."""
     scan_uuid = uuid.UUID(scan_id)
 
-    async with AsyncSessionLocal() as db:
+    async with celery_db_session() as db:
         # ------------------------------------------------------------------
         # STEP 1: Transition to processing
         # ------------------------------------------------------------------
@@ -141,7 +141,7 @@ async def _process_scan_async(
         )
 
         # ------------------------------------------------------------------
-        # STEP 7: Persist results
+        # STEP 7: Persist results + update invoice usage
         # ------------------------------------------------------------------
         await db.execute(
             update(Scan)
@@ -152,6 +152,22 @@ async def _process_scan_async(
                 total_rupee_risk=recon.total_rupee_risk,
             )
         )
+
+        # Increment invoice usage by actual count (not 1 at upload time)
+        from app.models.organization import Organization
+        org_result = await db.execute(
+            select(Organization).where(Organization.id == uuid.UUID(org_id))
+        )
+        org_obj = org_result.scalar_one_or_none()
+        if org_obj is not None:
+            new_usage = org_obj.invoices_used_this_month + recon.total_invoices_scanned
+            if new_usage > org_obj.invoice_limit:
+                await _mark_scan_failed(
+                    scan_id,
+                    "Invoice limit reached for this month. Upgrade your plan to scan more invoices.",
+                )
+                return {"status": "failed", "reason": "invoice_limit_reached"}
+            org_obj.invoices_used_this_month = new_usage
 
         mismatch_models: list[Mismatch] = []
         for m in recon.mismatches:
@@ -214,20 +230,60 @@ async def _process_scan_async(
         await db.commit()
 
         # ------------------------------------------------------------------
-        # STEP 10: Mark scan completed
+        # STEP 10: Generate PDF report and upload to S3
+        # ------------------------------------------------------------------
+        pdf_s3_key: Optional[str] = None
+        try:
+            from app.services.pdf_generator import ReportData, generate_mismatch_report
+            pdf_mismatches = [
+                {
+                    "invoice_number": m.invoice_number,
+                    "supplier_gstin": m.supplier_gstin,
+                    "mismatch_type": m.mismatch_type.value if hasattr(m.mismatch_type, "value") else m.mismatch_type,
+                    "gstr1_taxable_value": m.gstr1_taxable_value,
+                    "gstr3b_taxable_value": m.gstr3b_taxable_value,
+                    "gstr1_tax_amount": m.gstr1_tax_amount,
+                    "gstr3b_tax_amount": m.gstr3b_tax_amount,
+                    "rupee_difference": m.rupee_difference,
+                    "ai_explanation": getattr(m, "ai_explanation", None),
+                }
+                for m in saved_mismatches
+            ]
+            report_data = ReportData(
+                organization_name=org_obj.business_name if org_obj else "",
+                gstin=org_obj.gstin if org_obj else "",
+                scan_month=scan.scan_month,
+                total_invoices_scanned=recon.total_invoices_scanned,
+                total_mismatches=recon.total_mismatches,
+                total_rupee_risk=recon.total_rupee_risk,
+                mismatches=pdf_mismatches,
+                generated_at=datetime.now(tz=timezone.utc),
+            )
+            pdf_bytes = generate_mismatch_report(report_data)
+            pdf_key = s3_service.build_scan_pdf_key(org_id, scan_id)
+            await s3_service.upload_file(
+                pdf_bytes, pdf_key, content_type="application/pdf"
+            )
+            pdf_s3_key = pdf_key
+            logger.info("scan_pdf_generated", scan_id=scan_id, s3_key=pdf_key)
+        except Exception as exc:
+            logger.warning("scan_pdf_generation_failed", scan_id=scan_id, error=str(exc))
+
+        # ------------------------------------------------------------------
+        # STEP 11: Mark scan completed
         # ------------------------------------------------------------------
         now = datetime.now(tz=timezone.utc)
+        update_values: dict = dict(status=ScanStatus.completed, completed_at=now)
+        if pdf_s3_key:
+            update_values["pdf_s3_key"] = pdf_s3_key
         await db.execute(
             update(Scan)
             .where(Scan.id == scan_uuid)
-            .values(
-                status=ScanStatus.completed,
-                completed_at=now,
-            )
+            .values(**update_values)
         )
 
         # ------------------------------------------------------------------
-        # STEP 11: Audit log
+        # STEP 12: Audit log
         # ------------------------------------------------------------------
         db.add(
             AuditLog(

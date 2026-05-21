@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FileSpreadsheet, Eye, EyeOff, Loader2, CheckCircle, XCircle } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
+import { trackEvent } from "@/lib/analytics";
 import { ROUTES } from "@/lib/constants";
 import { validateGSTIN } from "@/lib/utils";
 
@@ -84,6 +85,7 @@ export default function SignupPage() {
     try {
       await register(fullName.trim(), email.trim(), password, gstin.trim());
       if (useAuthStore.getState().isAuthenticated) {
+        trackEvent("signup_completed", { gstin_state: gstin.trim().substring(0, 2) });
         router.push(ROUTES.DASHBOARD);
       }
     } catch {

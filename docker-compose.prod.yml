@@ -33,6 +33,8 @@ services:
     restart: always
     env_file:
       - .env.prod
+    environment:
+      - TZ=Asia/Kolkata
     depends_on:
       db:
         condition: service_healthy
@@ -51,6 +53,8 @@ services:
     command: celery -A app.workers.celery_app worker --loglevel=warning -Q high_priority,normal,low -c 4
     env_file:
       - .env.prod
+    environment:
+      - TZ=Asia/Kolkata
     depends_on:
       db:
         condition: service_healthy
@@ -63,7 +67,7 @@ services:
     command: >
       celery -A app.workers.celery_app beat
       --loglevel=info
-      --scheduler celery.beat.PersistentScheduler
+      --scheduler redbeat.RedBeatScheduler
     env_file:
       - .env.prod
     depends_on:

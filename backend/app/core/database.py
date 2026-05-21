@@ -1,7 +1,8 @@
 import time
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from sqlalchemy import text
+from sqlalchemy import NullPool, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -76,6 +77,33 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                     "slow_db_session",
                     duration_ms=round(elapsed * 1000),
                 )
+
+
+# ---------------------------------------------------------------------------
+# Celery-safe session (NullPool — no asyncpg connection reuse across event loops)
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def celery_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """Yield a fresh AsyncSession with NullPool for use inside Celery tasks.
+
+    Each Celery task runs its own event loop via asyncio.new_event_loop().
+    Using the module-level pooled engine across event loops causes asyncpg
+    errors because connections are loop-bound. NullPool creates a fresh
+    connection per session and discards it on close.
+    """
+    _engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+    factory = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+    finally:
+        await _engine.dispose()
 
 
 # ---------------------------------------------------------------------------

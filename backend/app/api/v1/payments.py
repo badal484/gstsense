@@ -220,8 +220,15 @@ async def verify_payment(
         },
     ))
 
-    # 7. Process referral commission if org has an active CA firm relationship
-    await process_payment_commission(db, payment)
+    # 7. Process referral commission — fault-tolerant, never blocks payment
+    try:
+        await process_payment_commission(db, payment)
+    except Exception as exc:
+        logger.error(
+            "commission_calculation_failed",
+            payment_id=str(payment.id),
+            error=str(exc),
+        )
 
     await db.commit()
     logger.info(
@@ -327,6 +334,102 @@ async def razorpay_webhook(
             payment.status = PaymentStatus.failed
             await db.commit()
             logger.info("webhook_payment_failed", order_id=order_id)
+
+    elif event == "subscription.charged":
+        from datetime import timedelta
+        from app.models.subscription import Subscription, SubscriptionStatus as SubStatus
+        try:
+            sub_id = payload["payload"]["subscription"]["entity"]["id"]
+        except (KeyError, TypeError):
+            return {"status": "ok"}
+
+        sub_result = await db.execute(
+            select(Subscription).where(Subscription.razorpay_subscription_id == sub_id)
+        )
+        sub = sub_result.scalar_one_or_none()
+        if sub:
+            today = datetime.now(tz=timezone.utc).date()
+            sub.current_period_start = today
+            sub.current_period_end = today + timedelta(days=30)
+            sub.status = SubStatus.active
+
+            org_sub_result = await db.execute(
+                select(Organization).where(Organization.id == sub.organization_id)
+            )
+            org_sub = org_sub_result.scalar_one_or_none()
+            if org_sub:
+                from app.models.organization import SubscriptionStatus as OrgSubStatus
+                org_sub.subscription_status = OrgSubStatus.active
+
+            db.add(AuditLog(
+                action="subscription_renewed",
+                organization_id=sub.organization_id,
+                metadata_json={"razorpay_subscription_id": sub_id},
+            ))
+            await db.commit()
+            logger.info("webhook_subscription_charged", sub_id=sub_id)
+
+    elif event == "subscription.cancelled":
+        from app.models.subscription import Subscription, SubscriptionStatus as SubStatus
+        try:
+            sub_id = payload["payload"]["subscription"]["entity"]["id"]
+        except (KeyError, TypeError):
+            return {"status": "ok"}
+
+        sub_result = await db.execute(
+            select(Subscription).where(Subscription.razorpay_subscription_id == sub_id)
+        )
+        sub = sub_result.scalar_one_or_none()
+        if sub:
+            sub.status = SubStatus.cancelled
+            sub.cancelled_at = datetime.now(tz=timezone.utc)
+
+            org_sub_result = await db.execute(
+                select(Organization).where(Organization.id == sub.organization_id)
+            )
+            org_sub = org_sub_result.scalar_one_or_none()
+            if org_sub:
+                from app.models.organization import SubscriptionStatus as OrgSubStatus
+                org_sub.subscription_status = OrgSubStatus.cancelled
+
+            db.add(AuditLog(
+                action="subscription_cancelled_via_webhook",
+                organization_id=sub.organization_id,
+                metadata_json={"razorpay_subscription_id": sub_id},
+            ))
+            await db.commit()
+            logger.info("webhook_subscription_cancelled", sub_id=sub_id)
+
+    elif event == "subscription.halted":
+        from app.models.subscription import Subscription, SubscriptionStatus as SubStatus
+        try:
+            sub_id = payload["payload"]["subscription"]["entity"]["id"]
+        except (KeyError, TypeError):
+            return {"status": "ok"}
+
+        sub_result = await db.execute(
+            select(Subscription).where(Subscription.razorpay_subscription_id == sub_id)
+        )
+        sub = sub_result.scalar_one_or_none()
+        if sub:
+            sub.status = SubStatus.past_due
+
+            org_sub_result = await db.execute(
+                select(Organization).where(Organization.id == sub.organization_id)
+            )
+            org_sub = org_sub_result.scalar_one_or_none()
+            if org_sub:
+                from app.models.organization import SubscriptionStatus as OrgSubStatus
+                org_sub.subscription_status = OrgSubStatus.past_due
+
+            db.add(AuditLog(
+                action="subscription_payment_failed",
+                organization_id=sub.organization_id,
+                metadata_json={"razorpay_subscription_id": sub_id},
+            ))
+            await db.commit()
+            logger.info("webhook_subscription_halted", sub_id=sub_id)
+
     else:
         logger.info("webhook_unhandled_event", webhook_event=event)
 

@@ -6,7 +6,7 @@ from typing import Any
 from celery import Task
 from sqlalchemy import select, update
 
-from app.core.database import AsyncSessionLocal
+from app.core.database import celery_db_session
 from app.core.logging import get_logger
 from app.models.audit_log import AuditLog
 from app.models.itc_scan import ITCScan, ITCScanStatus, ITCIssueRecord
@@ -45,7 +45,7 @@ def process_itc_task(self: Task, itc_scan_id: str, org_id: str) -> Any:
 
 
 async def _mark_itc_failed(itc_scan_id: str, error_message: str) -> None:
-    async with AsyncSessionLocal() as db:
+    async with celery_db_session() as db:
         await db.execute(
             update(ITCScan)
             .where(ITCScan.id == uuid.UUID(itc_scan_id))
@@ -61,7 +61,7 @@ async def _mark_itc_failed(itc_scan_id: str, error_message: str) -> None:
 async def _process_itc_async(itc_scan_id: str, org_id: str, task_id: str) -> dict:
     scan_uuid = uuid.UUID(itc_scan_id)
 
-    async with AsyncSessionLocal() as db:
+    async with celery_db_session() as db:
         # Step 1: Transition to processing
         await db.execute(
             update(ITCScan)

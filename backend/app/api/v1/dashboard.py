@@ -7,16 +7,17 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_org, get_current_user, get_db_session
 from app.core.logging import get_logger
+from app.models.compliance_score import ComplianceScoreRecord
 from app.models.notice import DraftStatus, Notice
 from app.models.organization import Organization, SubscriptionStatus
 from app.models.scan import Scan, ScanStatus
 from app.schemas.common import ApiResponse, make_response
-from app.services.compliance_score import calculate_org_compliance_score
+from app.services.compliance_score import ComplianceScore, calculate_org_compliance_score, get_compliance_grade
 from app.models.user import User
 
 logger = get_logger(__name__)
@@ -88,8 +89,39 @@ async def get_dashboard(
 ) -> ApiResponse[DashboardResponse]:
     org_id = str(org.id)
 
-    # 1. Compliance score
-    compliance = await calculate_org_compliance_score(org_id, db)
+    # 1. Compliance score — use today's stored record if available (avoids re-calculation on every page load)
+    today = date.today()
+    stored_q = await db.execute(
+        select(ComplianceScoreRecord)
+        .where(
+            ComplianceScoreRecord.organization_id == org.id,
+            func.date(ComplianceScoreRecord.calculated_at) == today,
+        )
+        .order_by(desc(ComplianceScoreRecord.calculated_at))
+        .limit(1)
+    )
+    stored_score = stored_q.scalar_one_or_none()
+
+    if stored_score is None:
+        compliance = await calculate_org_compliance_score(org_id, db)
+        new_record = ComplianceScoreRecord(
+            organization_id=org.id,
+            score=compliance.score,
+            grade=compliance.grade,
+        )
+        db.add(new_record)
+        await db.commit()
+    else:
+        # Re-use stored score — avoid recalculating on every page load
+        _, color = get_compliance_grade(stored_score.score)
+        compliance = ComplianceScore(
+            score=stored_score.score,
+            grade=stored_score.grade,
+            color=color,
+            factors=[],
+            recommendations=[],
+            trend="stable",
+        )
 
     # 2. All-time usage stats
     all_scans_q = await db.execute(
@@ -117,7 +149,6 @@ async def get_dashboard(
     )
 
     # Scans this month
-    today = date.today()
     month_start = datetime(today.year, today.month, 1, tzinfo=timezone.utc)
     scans_this_month = sum(
         1 for s in all_completed if s.created_at >= month_start

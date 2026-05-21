@@ -91,11 +91,18 @@ async def create_subscription(
     amount_paise = PLAN_PRICES_PAISE[request_body.plan]
     razorpay_sub_id: Optional[str] = None
 
+    plan_id_map: dict[str, str] = {
+        "smb": settings.RAZORPAY_PLAN_ID_SMB,
+        "growth": settings.RAZORPAY_PLAN_ID_GROWTH,
+        "ca_firm": settings.RAZORPAY_PLAN_ID_CA_FIRM,
+    }
+    razorpay_plan_id = plan_id_map[request_body.plan]
+
     try:
         client = get_razorpay_client()
         rz_sub = client.subscription.create(
             {
-                "plan_id": f"plan_{request_body.plan}",
+                "plan_id": razorpay_plan_id or f"plan_{request_body.plan}",
                 "total_count": 120,
                 "quantity": 1,
                 "notes": {

@@ -107,7 +107,7 @@ async def _send_filing_reminders_async(filing_type: str) -> dict:
         return {"sent": 0, "failed": 0, "skipped": 1}
 
     due_date_str = deadline.strftime("%-d %B %Y")
-    sent = failed = 0
+    sent = failed = skipped = 0
 
     engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
     async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -124,12 +124,22 @@ async def _send_filing_reminders_async(filing_type: str) -> dict:
             )
             orgs = orgs_q.scalars().all()
 
+            from app.models.user_preferences import UserPreferences
             for org in orgs:
                 user_q = await db.execute(
                     select(User).where(User.id == org.owner_user_id)
                 )
                 user = user_q.scalar_one_or_none()
                 if user is None or not user.phone:
+                    continue
+
+                # Respect notification preferences (default True if no record)
+                prefs_q = await db.execute(
+                    select(UserPreferences).where(UserPreferences.user_id == user.id)
+                )
+                prefs = prefs_q.scalar_one_or_none()
+                if prefs is not None and not prefs.whatsapp_deadline_reminders:
+                    skipped += 1
                     continue
 
                 try:

@@ -7,7 +7,7 @@ from typing import Any
 from celery import Task
 from sqlalchemy import select, update
 
-from app.core.database import AsyncSessionLocal
+from app.core.database import celery_db_session
 from app.core.logging import get_logger
 from app.models.audit_log import AuditLog
 from app.models.notice import DraftStatus, Notice
@@ -58,7 +58,7 @@ def generate_notice_draft_task(
 
 
 async def _mark_draft_failed(notice_id: str, error_message: str) -> None:
-    async with AsyncSessionLocal() as db:
+    async with celery_db_session() as db:
         await db.execute(
             update(Notice)
             .where(Notice.id == uuid.UUID(notice_id))
@@ -74,7 +74,7 @@ async def _mark_draft_failed(notice_id: str, error_message: str) -> None:
 async def _generate_draft_async(notice_id: str, org_id: str) -> dict:
     notice_uuid = uuid.UUID(notice_id)
 
-    async with AsyncSessionLocal() as db:
+    async with celery_db_session() as db:
         # Load notice
         result = await db.execute(select(Notice).where(Notice.id == notice_uuid))
         notice = result.scalar_one()

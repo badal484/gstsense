@@ -12,7 +12,7 @@ from app.api.deps import (
 )
 from app.core.config import settings
 from app.core.exceptions import AuthenticationError, ValidationError
-from app.core.security import create_access_token, create_refresh_token, hash_password, verify_password
+from app.core.security import add_user_to_blocklist, create_access_token, create_refresh_token, generate_secure_token, hash_password, verify_password
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.schemas.auth import (
@@ -61,6 +61,8 @@ async def register(
         role=user.account_type.value,
     )
     refresh_token = create_refresh_token(user_id=str(user.id))
+    await service.store_refresh_token(user.id, refresh_token)
+    await db.commit()
 
     return make_response(
         AuthResponse(
@@ -108,6 +110,8 @@ async def login(
         role=user.account_type.value,
     )
     refresh_token = create_refresh_token(user_id=str(user.id))
+    await service.store_refresh_token(user.id, refresh_token)
+    await db.commit()
 
     return make_response(
         AuthResponse(
@@ -144,6 +148,7 @@ async def refresh(
     new_access, new_refresh = await service.refresh_tokens(
         refresh_token=request_body.refresh_token,
     )
+    await db.commit()
     return make_response(
         TokenResponse(
             access_token=new_access,
@@ -288,6 +293,57 @@ async def change_password(
     db.add(AuditLog(action="password_changed", user_id=current_user.id))
     await db.commit()
     return make_response({"message": "Password changed successfully."})
+
+
+# ---------------------------------------------------------------------------
+# Delete account (DPDP Act compliance)
+# ---------------------------------------------------------------------------
+
+class DeleteAccountRequest(BaseModel):
+    confirmation: str
+
+
+@router.delete(
+    "/me",
+    response_model=ApiResponse[dict],
+    status_code=status.HTTP_200_OK,
+    summary="Delete account",
+)
+async def delete_account(
+    request_body: DeleteAccountRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[dict]:
+    from sqlalchemy import delete as sa_delete, update as sa_update
+    from app.models.refresh_token import RefreshToken as RT
+    from app.models.user_preferences import UserPreferences
+
+    if request_body.confirmation != "DELETE":
+        raise ValidationError(
+            message="Confirmation must be exactly 'DELETE'.",
+            code="VAL_010",
+        )
+
+    # Anonymise personal data (soft delete)
+    uid = current_user.id
+    current_user.is_active = False
+    current_user.email = f"deleted_{uid}@deleted.gstsense.in"
+    current_user.full_name = "Deleted User"
+    current_user.phone = None
+    current_user.hashed_password = hash_password(generate_secure_token(16))
+
+    # Revoke all refresh tokens
+    await db.execute(sa_delete(RT).where(RT.user_id == uid))
+
+    # Delete preferences
+    await db.execute(sa_delete(UserPreferences).where(UserPreferences.user_id == uid))
+
+    db.add(AuditLog(action="account_deleted", user_id=uid))
+    await db.commit()
+
+    await add_user_to_blocklist(str(uid))
+
+    return make_response({"message": "Your account has been scheduled for deletion."})
 
 
 # ---------------------------------------------------------------------------

@@ -530,3 +530,106 @@ async def list_notices(
             total=total,
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Public review endpoints (no authentication required)
+# ---------------------------------------------------------------------------
+
+class PublicReviewResponse(ApiResponse[dict]):
+    pass
+
+
+@router.get(
+    "/review/{token}",
+    response_model=ApiResponse[dict],
+    status_code=status.HTTP_200_OK,
+    summary="Get notice for public CA review (no auth)",
+)
+async def get_notice_for_review(
+    token: str,
+    db: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[dict]:
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    result = await db.execute(
+        select(Notice).where(Notice.share_token == token_hash)
+    )
+    notice = result.scalar_one_or_none()
+
+    if notice is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Review link not found.")
+
+    now = datetime.now(tz=timezone.utc)
+    is_expired = notice.share_token_expires_at is None or notice.share_token_expires_at < now
+
+    # Fetch org details
+    org_result = await db.execute(
+        select(Organization).where(Organization.id == notice.organization_id)
+    )
+    org = org_result.scalar_one_or_none()
+
+    return make_response({
+        "notice_id": str(notice.id),
+        "notice_type": notice.notice_type.value,
+        "gstin": org.gstin if org else "",
+        "business_name": org.business_name if org else "",
+        "tax_period": notice.tax_period,
+        "demand_amount": str(notice.demand_amount) if notice.demand_amount else None,
+        "draft_response": notice.draft_reply_text or "",
+        "draft_status": notice.draft_status.value,
+        "issued_at": notice.created_at.isoformat() if notice.created_at else None,
+        "due_date": notice.response_due_date.isoformat() if notice.response_due_date else None,
+        "is_expired": is_expired,
+    })
+
+
+class PublicApproveRequest(ApiResponse[dict]):
+    pass
+
+
+@router.post(
+    "/review/{token}/approve",
+    response_model=ApiResponse[dict],
+    status_code=status.HTTP_200_OK,
+    summary="Approve notice draft via share link (no auth)",
+)
+async def approve_via_share_link(
+    token: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db_session),
+    ip: Optional[str] = Depends(get_client_ip),
+) -> ApiResponse[dict]:
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    result = await db.execute(
+        select(Notice).where(Notice.share_token == token_hash)
+    )
+    notice = result.scalar_one_or_none()
+
+    if notice is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Review link not found.")
+
+    now = datetime.now(tz=timezone.utc)
+    if notice.share_token_expires_at is None or notice.share_token_expires_at < now:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=410, detail="This review link has expired.")
+
+    icai_number = str(body.get("icai_number", "")).strip()
+    comment = str(body.get("comment", "")).strip()
+
+    notice.draft_status = DraftStatus.approved
+    if icai_number:
+        notice.icai_membership_number = icai_number
+
+    db.add(AuditLog(
+        action="notice_approved_via_share_link",
+        organization_id=notice.organization_id,
+        resource_type="notice",
+        resource_id=notice.id,
+        ip_address=ip,
+        metadata_json={"icai_number": icai_number, "comment": comment},
+    ))
+    await db.commit()
+
+    return make_response({"message": "Response approved. Your CA has been notified."})

@@ -106,6 +106,7 @@ python-multipart==0.0.9
 pytz==2026.2
 PyYAML==6.0.3
 razorpay==1.4.1
+redbeat==2.0.0
 redis==5.0.4
 reportlab==4.2.0
 requests==2.34.2

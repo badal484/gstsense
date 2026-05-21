@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_ID: str
     RAZORPAY_KEY_SECRET: str
     RAZORPAY_WEBHOOK_SECRET: str
+    RAZORPAY_PLAN_ID_SMB: str = ""
+    RAZORPAY_PLAN_ID_GROWTH: str = ""
+    RAZORPAY_PLAN_ID_CA_FIRM: str = ""
 
     # ---- Notifications ----
     RESEND_API_KEY: str

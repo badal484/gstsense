@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-inter: "Inter", sans-serif;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    border-color: rgb(229 231 235);
+  }
+  body {
+    @apply antialiased;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .font-inter {
+    font-family: var(--font-inter);
+  }
+}

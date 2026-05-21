@@ -79,6 +79,16 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config
 
+    if (axios.isCancel(error)) {
+      return Promise.reject(new Error("Request cancelled."))
+    }
+
+    if (error.code === "ECONNABORTED") {
+      return Promise.reject(
+        new Error("Request timed out. Check your connection and try again."),
+      )
+    }
+
     if (!error.response) {
       return Promise.reject(
         new Error("Network error. Check your internet connection."),
@@ -195,7 +205,7 @@ export const scanApi = {
     if (scanMonth) form.append("scan_month", scanMonth)
     return api.post(API_ROUTES.SCANS.UPLOAD, form, {
       headers: { "Content-Type": "multipart/form-data" },
-      timeout: 60000,
+      timeout: 120000,
     })
   },
 
@@ -244,6 +254,14 @@ export const paymentApi = {
   > => api.post(API_ROUTES.PAYMENTS.VERIFY, data),
 }
 
+export const dashboardApi = {
+  get: (): Promise<AxiosResponse<ApiResponse<unknown>>> =>
+    api.get("/api/v1/dashboard/"),
+
+  scoreHistory: (days = 30): Promise<AxiosResponse<ApiResponse<{ date: string; score: number; grade: string }[]>>> =>
+    api.get(`/api/v1/dashboard/score-history?days=${days}`),
+}
+
 export const orgApi = {
   getMe: (): Promise<AxiosResponse<ApiResponse<Organization>>> =>
     api.get(API_ROUTES.ORGANIZATIONS.ME),
@@ -268,6 +286,13 @@ export const subscriptionApi = {
 
   cancel: (): Promise<AxiosResponse<ApiResponse<{ message: string; access_until: string }>>> =>
     api.post("/api/v1/subscriptions/cancel"),
+
+  verify: (data: {
+    razorpay_subscription_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+  }): Promise<AxiosResponse<ApiResponse<{ success: boolean; plan: string; message: string }>>> =>
+    api.post("/api/v1/subscriptions/verify", data),
 }
 
 export const userApi = {

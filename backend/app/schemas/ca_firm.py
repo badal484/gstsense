@@ -165,9 +165,9 @@ class CommissionSummary(BaseModel):
 
 class BrandingResponse(BaseModel):
     firm_name: str
-    primary_ca_name: str
+    ca_name: str
     city: str
     state: str
     primary_color: str
-    logo_s3_key: Optional[str]
+    logo_url: Optional[str]
     white_label_subdomain: str

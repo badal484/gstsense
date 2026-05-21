@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FileSpreadsheet, Loader2, AlertCircle } from "lucide-react";
 import { useScanPolling } from "@/hooks/useScan";
 import { useScanStore } from "@/store/scanStore";
@@ -24,7 +24,12 @@ const STATUS_MESSAGES = [
 
 export default function ProcessingPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { currentScanId } = useScanStore();
+
+  // Prefer URL param over store so page survives refresh
+  const scanId = searchParams.get("scan_id") ?? currentScanId;
+
   const [messageIndex, setMessageIndex] = useState(0);
   const [failed, setFailed] = useState(false);
   const [failReason, setFailReason] = useState<string | null>(null);
@@ -32,15 +37,15 @@ export default function ProcessingPage() {
   const pollingStarted = useRef(false);
 
   useEffect(() => {
-    if (!currentScanId) {
-      router.push(ROUTES.SCAN);
+    if (!scanId) {
+      router.push(ROUTES.SCAN + "?expired=1");
       return;
     }
     if (pollingStarted.current) return;
     pollingStarted.current = true;
 
     startPolling(
-      currentScanId,
+      scanId,
       () => router.push(ROUTES.SCAN_PREVIEW),
       (err) => {
         setFailed(true);
@@ -49,7 +54,7 @@ export default function ProcessingPage() {
     );
 
     return () => stopPolling();
-  }, [currentScanId, router, startPolling, stopPolling]);
+  }, [scanId, router, startPolling, stopPolling]);
 
   useEffect(() => {
     const interval = setInterval(() => {

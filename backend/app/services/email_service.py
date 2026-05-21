@@ -128,6 +128,30 @@ class EmailService:
         """
         return await self._send(to_email, subject, _wrap(body))
 
+    async def send_verification_email(
+        self,
+        to_email: str,
+        full_name: str,
+        verification_token: str,
+    ) -> bool:
+        """Send email-verification link."""
+        url = f"{settings.FRONTEND_URL}/verify-email?token={verification_token}"
+        subject = "Verify your GSTSense email address"
+        body = f"""
+        <h2>Verify Your Email</h2>
+        <p>Hi {full_name},</p>
+        <p>Welcome to GSTSense! Please verify your email address to get started.</p>
+        <a href="{url}" class="btn">Verify Email Address</a>
+        <p style="color:#888;font-size:12px;">
+          This link expires in <strong>24 hours</strong>. If you did not create a GSTSense
+          account, you can safely ignore this email.
+        </p>
+        <p style="word-break:break-all;font-size:11px;color:#aaa;">
+          If the button doesn't work, copy this URL:<br>{url}
+        </p>
+        """
+        return await self._send(to_email, subject, _wrap(body))
+
     async def send_password_reset_email(
         self,
         to_email: str,
@@ -191,4 +215,13 @@ async def send_password_reset_email(email: str, reset_token: str) -> None:
         to_email=email,
         full_name="",
         reset_token=reset_token,
+    )
+
+
+async def send_verification_email(email: str, full_name: str, token: str) -> None:
+    """Module-level wrapper for verification email."""
+    await email_service.send_verification_email(
+        to_email=email,
+        full_name=full_name,
+        verification_token=token,
     )

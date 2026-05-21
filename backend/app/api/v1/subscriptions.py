@@ -1,6 +1,9 @@
 from datetime import date, timedelta
 from typing import Optional
 
+import hashlib
+import hmac
+
 import razorpay
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, field_validator
@@ -9,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_org, get_current_user, get_db_session
 from app.core.config import settings
-from app.core.exceptions import ConflictError, ExternalServiceError, NotFoundError
+from app.core.exceptions import ConflictError, ExternalServiceError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.audit_log import AuditLog
 from app.models.organization import Organization, Plan, SubscriptionStatus
@@ -228,4 +231,74 @@ async def cancel_subscription(
     return make_response({
         "message": "Subscription cancelled. Access continues until end of current period.",
         "access_until": str(sub.current_period_end),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Verify subscription payment
+# ---------------------------------------------------------------------------
+
+class VerifySubscriptionRequest(BaseModel):
+    razorpay_subscription_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+@router.post(
+    "/verify",
+    response_model=ApiResponse[dict],
+    status_code=status.HTTP_200_OK,
+    summary="Verify Razorpay subscription payment",
+)
+async def verify_subscription(
+    body: VerifySubscriptionRequest,
+    current_user: User = Depends(get_current_user),
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[dict]:
+    # 1. Verify HMAC-SHA256 signature
+    message = f"{body.razorpay_payment_id}|{body.razorpay_subscription_id}".encode()
+    expected = hmac.new(
+        settings.RAZORPAY_KEY_SECRET.encode(),
+        message,
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, body.razorpay_signature):
+        raise ValidationError(
+            message="Subscription payment verification failed.",
+            code="VAL_001",
+        )
+
+    # 2. Find subscription
+    result = await db.execute(
+        select(Subscription).where(
+            Subscription.razorpay_subscription_id == body.razorpay_subscription_id,
+            Subscription.organization_id == org.id,
+        )
+    )
+    sub = result.scalar_one_or_none()
+    if sub is None:
+        raise NotFoundError(message="Subscription not found.", code="NF_010")
+
+    # 3. Activate
+    sub.status = SubStatus.active
+    org.subscription_status = SubscriptionStatus.active
+    org.plan = PLAN_MAP.get(sub.plan.value, Plan.smb)
+
+    db.add(AuditLog(
+        action="subscription_verified",
+        user_id=current_user.id,
+        organization_id=org.id,
+        metadata_json={
+            "razorpay_subscription_id": body.razorpay_subscription_id,
+            "plan": sub.plan.value,
+        },
+    ))
+    await db.commit()
+    logger.info("subscription_verified", org_id=str(org.id), plan=sub.plan.value)
+
+    return make_response({
+        "success": True,
+        "plan": sub.plan.value,
+        "message": "Subscription activated successfully.",
     })

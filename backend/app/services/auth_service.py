@@ -28,7 +28,7 @@ from app.models.organization import Organization, Plan
 from app.models.refresh_token import RefreshToken
 from app.models.user import AccountType, User
 from app.schemas.auth import LoginRequest, RegisterRequest
-from app.services.email_service import send_password_reset_email
+from app.services.email_service import send_password_reset_email, send_verification_email
 
 logger = get_logger(__name__)
 
@@ -62,7 +62,15 @@ class AuthService:
         if existing.scalar_one_or_none() is not None:
             raise ConflictError.email_already_registered(request.email)
 
-        # 2. GSTIN uniqueness (case-insensitive)
+        # 2. GSTIN format + portal verification
+        from app.services.gstin_validator import verify_gstin_exists
+        if not await verify_gstin_exists(request.gstin):
+            raise ValidationError(
+                message="GSTIN is not registered on the GST portal. Please check and try again.",
+                code="VAL_011",
+            )
+
+        # GSTIN uniqueness (case-insensitive)
         existing_org = await self.db.execute(
             select(Organization).where(
                 func.upper(Organization.gstin) == request.gstin.upper()
@@ -71,7 +79,10 @@ class AuthService:
         if existing_org.scalar_one_or_none() is not None:
             raise ConflictError.gstin_already_registered(request.gstin)
 
-        # 3. Create User
+        # 3. Create User (generate verification token)
+        plain_verification_token = generate_secure_token(32)
+        hashed_verification_token = hashlib.sha256(plain_verification_token.encode()).hexdigest()
+
         user = User(
             email=request.email,
             hashed_password=hash_password(request.password),
@@ -79,6 +90,7 @@ class AuthService:
             account_type=AccountType.smb,
             is_active=True,
             is_verified=False,
+            email_verification_token=hashed_verification_token,
         )
         self.db.add(user)
         await self.db.flush()  # populate user.id before creating the org
@@ -107,6 +119,16 @@ class AuthService:
         # Refresh to pick up server-default timestamps (created_at, updated_at)
         await self.db.refresh(user)
         await self.db.refresh(org)
+
+        # Send verification email (non-blocking — failure doesn't break registration)
+        try:
+            await send_verification_email(
+                email=user.email,
+                full_name=user.full_name,
+                token=plain_verification_token,
+            )
+        except Exception as exc:
+            logger.error("verification_email_failed", email=user.email, error=str(exc))
 
         logger.info(
             "user_registered",

@@ -64,6 +64,7 @@ export default function CADashboardPage() {
   const [loading, setLoading] = useState(true);
   const [notRegistered, setNotRegistered] = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
+  const [reportPolling, setReportPolling] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -72,11 +73,18 @@ export default function CADashboardPage() {
           api.get(API_ROUTES.CA_FIRMS.ME),
           api.get(API_ROUTES.CA_FIRMS.DASHBOARD),
         ]);
-        setFirm(firmRes.data.data);
-        setStats(statsRes.data.data);
-      } catch (err: unknown) {
-        const status = (err as { response?: { status?: number } })?.response?.status;
-        if (status === 403 || status === 404) setNotRegistered(true);
+        // data may be nested under .data.data or just .data depending on response shape
+        const firmData = firmRes.data?.data ?? firmRes.data;
+        const statsData = statsRes.data?.data ?? statsRes.data;
+        if (!firmData || !statsData) {
+          setNotRegistered(true);
+        } else {
+          setFirm(firmData);
+          setStats(statsData);
+        }
+      } catch {
+        // Any error (403, 404, network) on these endpoints means the user has no CA firm
+        setNotRegistered(true);
       } finally {
         setLoading(false);
       }
@@ -87,17 +95,32 @@ export default function CADashboardPage() {
   async function downloadReport() {
     setDownloadingReport(true);
     try {
-      const r = await api.get(API_ROUTES.CA_FIRMS.REPORT, { responseType: "blob" });
-      const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "ca_firm_report.pdf";
-      a.click();
-      URL.revokeObjectURL(url);
+      // Enqueue the background job
+      const jobRes = await api.post(API_ROUTES.CA_FIRMS.REPORT);
+      const jobId: string = jobRes.data?.data?.job_id;
+      if (!jobId) throw new Error("No job_id returned");
+
+      // Poll until complete (max 60s)
+      setReportPolling(true);
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 2500));
+        const pollRes = await api.get(`/api/v1/ca-firms/me/report/${jobId}`);
+        const result = pollRes.data?.data;
+        if (result?.status === "completed" && result.download_url) {
+          const a = document.createElement("a");
+          a.href = result.download_url;
+          a.download = "ca_firm_report.pdf";
+          a.click();
+          break;
+        }
+        if (result?.status === "failed") break;
+      }
     } catch {
-      // ignore
+      // ignore — user will see button return to normal state
     } finally {
       setDownloadingReport(false);
+      setReportPolling(false);
     }
   }
 
@@ -135,7 +158,13 @@ export default function CADashboardPage() {
     );
   }
 
-  if (!firm || !stats) return null;
+  if (!firm || !stats) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-8 h-8 text-blue-700 animate-spin" />
+      </div>
+    );
+  }
 
   const statCards = [
     {
@@ -192,7 +221,7 @@ export default function CADashboardPage() {
             ) : (
               <Download className="w-4 h-4" />
             )}
-            Export Report
+            {reportPolling ? "Generating…" : downloadingReport ? "Starting…" : "Export Report"}
           </button>
           <Link
             href="/ca/clients"

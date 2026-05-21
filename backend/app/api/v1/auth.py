@@ -1,7 +1,10 @@
+import hashlib
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from pydantic import BaseModel, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -259,6 +262,47 @@ async def reset_password(
         new_password=request_body.new_password,
     )
     return make_response({"message": "Password reset successfully. Please log in."})
+
+
+# ---------------------------------------------------------------------------
+# Verify email
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/verify-email",
+    response_model=ApiResponse[dict],
+    status_code=status.HTTP_200_OK,
+    summary="Verify email address",
+    description="Confirm email ownership using the token sent at registration.",
+)
+async def verify_email(
+    token: str = Query(..., description="Verification token from email link"),
+    db: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[dict]:
+    from app.models.user import User as _User
+
+    hashed = hashlib.sha256(token.encode()).hexdigest()
+    result = await db.execute(
+        select(_User).where(_User.email_verification_token == hashed)
+    )
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise ValidationError(
+            message="Invalid or expired verification link.",
+            code="VAL_007",
+        )
+
+    if user.is_verified:
+        return make_response({"message": "Email already verified. You can log in."})
+
+    user.is_verified = True
+    user.email_verification_token = None
+    db.add(AuditLog(action="email_verified", user_id=user.id))
+    await db.commit()
+
+    return make_response({"message": "Email verified successfully. You can now log in."})
 
 
 # ---------------------------------------------------------------------------

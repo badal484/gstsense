@@ -6,6 +6,7 @@ from slowapi.util import get_remote_address
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -13,7 +14,7 @@ logger = get_logger(__name__)
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=["200/minute"],
-    storage_uri="memory://",
+    storage_uri=settings.REDIS_URL,
 )
 
 AUTH_LIMIT = "5/minute"

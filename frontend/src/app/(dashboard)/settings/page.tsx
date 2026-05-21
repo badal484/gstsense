@@ -10,7 +10,6 @@ import {
   EyeOff,
   Loader2,
   Shield,
-  Terminal,
   Trash2,
   User,
 } from "lucide-react";
@@ -20,14 +19,13 @@ import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/lib/utils";
 import { Organization, User as UserType } from "@/types";
 
-type Tab = "profile" | "notifications" | "security" | "billing" | "api";
+type Tab = "profile" | "notifications" | "security" | "billing";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "profile", label: "Profile", icon: <User className="w-4 h-4" /> },
   { id: "notifications", label: "Notifications", icon: <Bell className="w-4 h-4" /> },
   { id: "security", label: "Security", icon: <Shield className="w-4 h-4" /> },
   { id: "billing", label: "Billing", icon: <CreditCard className="w-4 h-4" /> },
-  { id: "api", label: "API", icon: <Terminal className="w-4 h-4" /> },
 ];
 
 function SaveButton({ saving, saved }: { saving: boolean; saved: boolean }) {
@@ -454,9 +452,43 @@ function SecurityTab() {
 }
 
 // ── Billing Tab ───────────────────────────────────────────────────────────────
+type SubInfo = {
+  id: string;
+  plan: string;
+  status: string;
+  current_period_end: string;
+  amount_paise: number;
+} | null;
+
 function BillingTab({ org }: { org: Organization }) {
   const planLabel = PLAN_LIMITS[org.plan]?.label ?? org.plan;
   const isFree = org.plan === "free";
+
+  const [sub, setSub] = useState<SubInfo>(undefined as unknown as SubInfo);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelMsg, setCancelMsg] = useState("");
+
+  useEffect(() => {
+    api.get("/api/v1/subscriptions/current")
+      .then((r) => setSub(r.data?.data ?? null))
+      .catch(() => setSub(null));
+  }, []);
+
+  async function handleCancel() {
+    setCancelling(true);
+    try {
+      const r = await api.post("/api/v1/subscriptions/cancel");
+      const until = r.data?.data?.access_until ?? "";
+      setCancelMsg(`Subscription cancelled. Access continues until ${until ? new Date(until).toLocaleDateString("en-IN") : "end of period"}.`);
+      setSub((s) => s ? { ...s, status: "cancelled" } : s);
+    } catch {
+      setCancelMsg("Failed to cancel. Please try again or contact support.");
+    } finally {
+      setCancelling(false);
+      setCancelModalOpen(false);
+    }
+  }
 
   const upgrades: { plan: "smb" | "growth" | "ca_firm"; label: string; price: number; desc: string }[] = [
     { plan: "smb", label: "SMB", price: PLAN_PRICES.smb, desc: "Up to 1,500 invoices / month" },
@@ -464,32 +496,96 @@ function BillingTab({ org }: { org: Organization }) {
     { plan: "ca_firm", label: "CA Firm", price: PLAN_PRICES.ca_firm, desc: "Up to 50,000 invoices / month + white-label" },
   ];
 
+  const PLAN_LABELS: Record<string, string> = {
+    smb: "SMB Plan",
+    growth: "Growth Plan",
+    ca_firm: "CA Firm Plan",
+    free: "Free Plan",
+  };
+
   return (
     <div className="space-y-8">
-      <Section title="Current Plan">
-        <div className="bg-blue-50 border border-blue-100 rounded-xl px-5 py-4 flex items-center justify-between">
-          <div>
-            <p className="text-lg font-bold text-blue-900">{planLabel} Plan</p>
-            <p className="text-sm text-blue-700 mt-0.5">
-              {PLAN_LIMITS[org.plan]?.invoices?.toLocaleString()} invoices / month
+      {cancelMsg && (
+        <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-800">
+          {cancelMsg}
+        </div>
+      )}
+
+      {/* Cancel confirmation modal */}
+      {cancelModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4 space-y-4">
+            <h3 className="text-lg font-bold text-gray-900">Cancel subscription?</h3>
+            <p className="text-sm text-gray-600">
+              You will lose access at the end of your current billing period. You can still use
+              GSTSense until then.
             </p>
-            {org.billing_cycle_end && (
-              <p className="text-xs text-blue-500 mt-1">
-                Renews {new Date(org.billing_cycle_end).toLocaleDateString("en-IN")}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCancelModalOpen(false)}
+                className="flex-1 border border-gray-200 text-gray-700 font-semibold py-2 rounded-xl text-sm hover:bg-gray-50"
+              >
+                Keep Subscription
+              </button>
+              <button
+                onClick={handleCancel}
+                disabled={cancelling}
+                className="flex-1 bg-red-600 text-white font-semibold py-2 rounded-xl text-sm hover:bg-red-700 disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {cancelling && <Loader2 className="w-4 h-4 animate-spin" />}
+                Cancel Plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Section title="Current Plan">
+        {sub === undefined ? (
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+          </div>
+        ) : sub && sub.status === "active" ? (
+          <div className="bg-green-50 border border-green-200 rounded-xl px-5 py-4 flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Check className="w-4 h-4 text-green-600" />
+                <p className="text-sm font-bold text-green-900">Active Subscription</p>
+              </div>
+              <p className="text-sm text-green-800">
+                Plan: {PLAN_LABELS[sub.plan] ?? sub.plan} · ₹{(sub.amount_paise / 100).toLocaleString()}/month
               </p>
+              <p className="text-xs text-green-600 mt-0.5">
+                Next billing: {new Date(sub.current_period_end).toLocaleDateString("en-IN")}
+              </p>
+            </div>
+            {sub.status === "active" && (
+              <button
+                onClick={() => setCancelModalOpen(true)}
+                className="shrink-0 text-xs font-semibold border border-red-300 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors"
+              >
+                Cancel Subscription
+              </button>
             )}
           </div>
-          <span
-            className={cn(
-              "text-xs font-semibold px-3 py-1 rounded-full",
-              org.has_active_subscription
-                ? "bg-green-100 text-green-700"
-                : "bg-amber-100 text-amber-700"
-            )}
-          >
-            {org.has_active_subscription ? "Active" : org.subscription_status}
-          </span>
-        </div>
+        ) : (
+          <div className="bg-blue-50 border border-blue-100 rounded-xl px-5 py-4 flex items-center justify-between">
+            <div>
+              <p className="text-lg font-bold text-blue-900">{planLabel} Plan</p>
+              <p className="text-sm text-blue-700 mt-0.5">
+                {PLAN_LIMITS[org.plan]?.invoices?.toLocaleString()} invoices / month
+              </p>
+              {org.billing_cycle_end && (
+                <p className="text-xs text-blue-500 mt-1">
+                  Renews {new Date(org.billing_cycle_end).toLocaleDateString("en-IN")}
+                </p>
+              )}
+            </div>
+            <span className="text-xs font-semibold px-3 py-1 rounded-full bg-amber-100 text-amber-700">
+              {org.subscription_status ?? "Free"}
+            </span>
+          </div>
+        )}
       </Section>
 
       {isFree && (
@@ -552,24 +648,6 @@ function BillingTab({ org }: { org: Organization }) {
   );
 }
 
-// ── API Tab ───────────────────────────────────────────────────────────────────
-function ApiTab() {
-  return (
-    <div className="space-y-6">
-      <Section title="API Access">
-        <div className="bg-gray-50 rounded-xl px-5 py-8 text-center">
-          <Terminal className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-          <p className="text-sm font-semibold text-gray-600">API Access Coming Soon</p>
-          <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
-            Programmatic access to GSTSense reconciliation and ITC analysis will be available in a
-            future release.
-          </p>
-        </div>
-      </Section>
-    </div>
-  );
-}
-
 // ── Root Page ─────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const { user, organization } = useAuthStore();
@@ -619,7 +697,6 @@ export default function SettingsPage() {
           {activeTab === "notifications" && <NotificationsTab />}
           {activeTab === "security" && <SecurityTab />}
           {activeTab === "billing" && <BillingTab org={organization} />}
-          {activeTab === "api" && <ApiTab />}
         </div>
       </div>
     </div>

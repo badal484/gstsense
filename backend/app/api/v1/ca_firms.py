@@ -573,78 +573,51 @@ async def mark_commission_paid(
 # ---------------------------------------------------------------------------
 
 
-@router.get(
+@router.post(
     "/me/report",
-    summary="Download bulk CA client report PDF",
+    response_model=ApiResponse[dict],
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Enqueue bulk CA client report PDF generation",
 )
-async def download_bulk_report(
+async def enqueue_bulk_report(
     current_user: User = Depends(get_current_user),
     org: Organization = Depends(require_plan("ca_firm")),
     db: AsyncSession = Depends(get_db_session),
-) -> object:
-    from fastapi.responses import Response
-
-    from app.services.pdf_generator import generate_bulk_ca_report
+) -> ApiResponse[dict]:
+    from app.workers.report_tasks import generate_bulk_ca_report_task
 
     ca_firm = await _get_ca_firm_or_404(db, current_user.id)
+    task = generate_bulk_ca_report_task.delay(str(ca_firm.id), str(org.id))
 
-    # Fetch all active clients + their recent commissions
-    rel_q = await db.execute(
-        select(CAClientRelationship).where(
-            CAClientRelationship.ca_firm_id == ca_firm.id,
-            CAClientRelationship.status == CAClientStatus.active,
-        ).order_by(CAClientRelationship.created_at.desc())
-    )
-    relationships = rel_q.scalars().all()
+    return make_response({
+        "job_id": task.id,
+        "message": "Report generation started. Poll /me/report/{job_id} for status.",
+    })
 
-    com_q = await db.execute(
-        select(ReferralCommission)
-        .where(ReferralCommission.ca_firm_id == ca_firm.id)
-        .order_by(ReferralCommission.created_at.desc())
-        .limit(200)
-    )
-    commissions = com_q.scalars().all()
 
-    clients_data = [
-        {
-            "name": r.organization.business_name,
-            "gstin": r.organization.gstin,
-            "commission_rate": float(r.referral_commission_rate),
-            "added_on": r.created_at.strftime("%d/%m/%Y"),
-        }
-        for r in relationships
-    ]
+@router.get(
+    "/me/report/{job_id}",
+    response_model=ApiResponse[dict],
+    summary="Poll bulk CA report generation status",
+)
+async def get_bulk_report_status(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+    org: Organization = Depends(require_plan("ca_firm")),
+) -> ApiResponse[dict]:
+    from celery.result import AsyncResult
+    from app.workers.celery_app import celery_app
 
-    commissions_data = [
-        {
-            "org_name": c.organization.business_name,
-            "amount": float(c.commission_amount),
-            "rate": float(c.commission_rate),
-            "status": c.status.value,
-            "date": c.created_at.strftime("%d/%m/%Y"),
-        }
-        for c in commissions
-    ]
+    result = AsyncResult(job_id, app=celery_app)
+    state = result.state
 
-    pdf_bytes = generate_bulk_ca_report(
-        firm_name=ca_firm.firm_name,
-        primary_ca_name=ca_firm.primary_ca_name,
-        icai_membership_number=ca_firm.icai_membership_number,
-        city=ca_firm.city,
-        state=ca_firm.state,
-        total_clients=ca_firm.total_clients,
-        total_earnings=float(ca_firm.total_referral_earnings),
-        clients=clients_data,
-        commissions=commissions_data,
-        generated_at=datetime.now(tz=timezone.utc),
-    )
-
-    filename = f"ca_report_{ca_firm.firm_name.replace(' ', '_')}.pdf"
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    if state == "PENDING":
+        return make_response({"status": "pending"})
+    if state == "SUCCESS":
+        return make_response({"status": "completed", **result.result})
+    if state in ("FAILURE", "REVOKED"):
+        return make_response({"status": "failed", "error": str(result.info)})
+    return make_response({"status": "processing"})
 
 
 # ---------------------------------------------------------------------------

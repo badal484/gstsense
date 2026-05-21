@@ -54,12 +54,8 @@ export default function NoticeReviewPage() {
           setStatus("loaded");
         }
       })
-      .catch((err) => {
-        if (err?.response?.status === 404) {
-          setStatus("not_found");
-        } else {
-          setStatus("error");
-        }
+      .catch(() => {
+        setStatus("not_found");
       });
   }, [token]);
 

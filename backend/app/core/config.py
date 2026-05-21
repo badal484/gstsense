@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str
     INTERAKT_API_KEY: str
 
+    # ---- GSTIN Validation ----
+    FASTGST_API_KEY: Optional[str] = None
+
     # ---- Monitoring ----
     SENTRY_DSN: Optional[str] = None
 

@@ -2,13 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle, X } from "lucide-react";
+import { LineChart, Line, ResponsiveContainer, Tooltip } from "recharts";
 import { cn } from "@/lib/utils";
+import { dashboardApi } from "@/lib/api";
 
 interface Factor {
   name: string;
   status: "good" | "warning" | "critical";
   description: string;
   points: string;
+}
+
+interface HistoryPoint {
+  date: string;
+  score: number;
+  grade: string;
 }
 
 interface ComplianceScoreWidgetProps {
@@ -75,14 +83,7 @@ function ScoreCircle({
   return (
     <div className="relative inline-flex items-center justify-center">
       <svg width={dim} height={dim} style={{ transform: "rotate(-90deg)" }}>
-        <circle
-          cx={dim / 2}
-          cy={dim / 2}
-          r={r}
-          fill="none"
-          stroke="#E5E7EB"
-          strokeWidth={strokeW}
-        />
+        <circle cx={dim / 2} cy={dim / 2} r={r} fill="none" stroke="#E5E7EB" strokeWidth={strokeW} />
         <circle
           cx={dim / 2}
           cy={dim / 2}
@@ -100,6 +101,60 @@ function ScoreCircle({
           {displayed}
         </span>
       </div>
+    </div>
+  );
+}
+
+function ScoreSparkline({ color }: { color: string }) {
+  const [history, setHistory] = useState<HistoryPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    dashboardApi
+      .scoreHistory(30)
+      .then((res) => {
+        setHistory(res.data?.data ?? []);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return null;
+
+  if (history.length < 2) {
+    return (
+      <p className="text-xs text-gray-400 text-center mt-2">
+        Not enough data yet. Check back tomorrow.
+      </p>
+    );
+  }
+
+  const first = history[0].score;
+  const last = history[history.length - 1].score;
+  const delta = last - first;
+  const trendText =
+    delta >= 5 ? "📈 Improving" : delta <= -5 ? "📉 Declining" : "➡️ Stable";
+
+  return (
+    <div className="mt-3 space-y-1">
+      <ResponsiveContainer width="100%" height={48}>
+        <LineChart data={history}>
+          <Line
+            type="monotone"
+            dataKey="score"
+            stroke={color}
+            strokeWidth={2}
+            dot={false}
+            isAnimationActive={false}
+          />
+          <Tooltip
+            formatter={(val) => [`${val}`, "Score"]}
+            labelFormatter={(label) => String(label)}
+            contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #e5e7eb" }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+      <p className="text-xs text-gray-500 text-center">{trendText}</p>
     </div>
   );
 }
@@ -151,6 +206,7 @@ export function ComplianceScoreWidget({
           </span>
           <p className="text-xs text-gray-400 mt-1">Compliance Health Score</p>
         </div>
+        {showDetails && <ScoreSparkline color={computedColor} />}
       </div>
 
       {showDetails && factors.length > 0 && (

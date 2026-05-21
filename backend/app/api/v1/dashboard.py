@@ -18,6 +18,7 @@ from app.models.organization import Organization, SubscriptionStatus
 from app.models.scan import Scan, ScanStatus
 from app.schemas.common import ApiResponse, make_response
 from app.services.compliance_score import ComplianceScore, calculate_org_compliance_score, get_compliance_grade
+from fastapi import Query as FQuery
 from app.models.user import User
 
 logger = get_logger(__name__)
@@ -59,6 +60,7 @@ class DashboardResponse(BaseModel):
 
     recent_scans: list[RecentScanSummary]
     pending_notices: int
+    score_trend: str
 
 
 def _next_deadline(day_of_month: int, today: date) -> date:
@@ -197,6 +199,25 @@ async def get_dashboard(
     )
     pending_notices = notices_q.scalar() or 0
 
+    # 7. Compute trend by comparing today's score to 30 days ago
+    from datetime import timedelta as _td
+    cutoff_30 = datetime.now(tz=timezone.utc) - _td(days=30)
+    old_q = await db.execute(
+        select(ComplianceScoreRecord)
+        .where(
+            ComplianceScoreRecord.organization_id == org.id,
+            ComplianceScoreRecord.calculated_at <= cutoff_30,
+        )
+        .order_by(desc(ComplianceScoreRecord.calculated_at))
+        .limit(1)
+    )
+    old_record = old_q.scalar_one_or_none()
+    if old_record is not None:
+        delta = compliance.score - old_record.score
+        score_trend = "improving" if delta >= 5 else ("declining" if delta <= -5 else "stable")
+    else:
+        score_trend = "stable"
+
     return make_response(DashboardResponse(
         compliance_score=compliance.score,
         compliance_grade=compliance.grade,
@@ -217,4 +238,38 @@ async def get_dashboard(
         days_to_gstr3b=days_to_gstr3b,
         recent_scans=recent_scans,
         pending_notices=pending_notices,
+        score_trend=score_trend,
     ))
+
+
+@router.get(
+    "/score-history",
+    response_model=ApiResponse[list],
+    summary="Get compliance score history",
+)
+async def get_score_history(
+    days: int = FQuery(default=30, ge=1, le=90),
+    current_user: User = Depends(get_current_user),
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[list]:
+    from datetime import timedelta as _td2
+    cutoff = datetime.now(tz=timezone.utc) - _td2(days=days)
+    result = await db.execute(
+        select(ComplianceScoreRecord)
+        .where(
+            ComplianceScoreRecord.organization_id == org.id,
+            ComplianceScoreRecord.calculated_at >= cutoff,
+        )
+        .order_by(ComplianceScoreRecord.calculated_at.asc())
+    )
+    records = result.scalars().all()
+    history = [
+        {
+            "date": r.calculated_at.strftime("%Y-%m-%d"),
+            "score": r.score,
+            "grade": r.grade,
+        }
+        for r in records
+    ]
+    return make_response(history)

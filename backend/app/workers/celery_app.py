@@ -11,6 +11,7 @@ celery_app = Celery(
         "app.workers.scan_tasks",
         "app.workers.itc_tasks",
         "app.workers.notice_tasks",
+        "app.workers.report_tasks",
         "app.workers.scheduler",
     ],
 )
@@ -35,6 +36,7 @@ celery_app.conf.update(
         "app.workers.scheduler.reset_invoice_counts": {"queue": "low"},
         "app.workers.scheduler.update_compliance_scores": {"queue": "low"},
         "app.workers.scheduler.process_monthly_payouts": {"queue": "low"},
+        "app.workers.report_tasks.generate_bulk_ca_report_task": {"queue": "low"},
     },
     worker_max_tasks_per_child=50,
     task_soft_time_limit=240,

@@ -29,6 +29,16 @@ export default function PrivacyPage() {
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-12 space-y-10">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <p className="text-amber-800 text-sm font-medium">⚠️ Legal Review Required</p>
+          <p className="text-amber-700 text-sm mt-1">
+            These documents are templates and must be reviewed by a qualified Indian lawyer before
+            going live. Contact{" "}
+            <a href="mailto:legal@gstsense.in" className="underline">legal@gstsense.in</a>{" "}
+            for assistance.
+          </p>
+        </div>
+
         <div>
           <h1 className="text-3xl font-extrabold text-gray-900">Privacy Policy</h1>
           <p className="text-sm text-gray-400 mt-1">Last updated: January 2025</p>

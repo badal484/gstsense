@@ -1,7 +1,7 @@
 """Compliance health score calculator for GST organisations."""
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
@@ -311,7 +311,6 @@ async def calculate_org_compliance_score(
 ) -> ComplianceScore:
     """Fetch all required data and calculate compliance score for an organisation."""
     from app.models.itc_scan import ITCScan, ITCScanStatus
-    from app.models.mismatch import Mismatch
     from app.models.notice import DraftStatus, Notice
     from app.models.organization import Organization, SubscriptionStatus
     from app.models.scan import Scan, ScanStatus

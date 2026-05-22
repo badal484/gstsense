@@ -8,7 +8,7 @@ import {
   Building2,
   CheckCircle,
   Clock,
-  DollarSign,
+  IndianRupee,
   Download,
   Loader2,
   Users,
@@ -188,7 +188,7 @@ export default function CADashboardPage() {
     {
       label: "This Month",
       value: formatRupees(stats.commissions_this_month),
-      icon: <DollarSign className="w-5 h-5 text-purple-600" />,
+      icon: <IndianRupee className="w-5 h-5 text-purple-600" />,
       bg: "bg-purple-50",
     },
   ];

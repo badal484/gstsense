@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   Lock,
@@ -70,36 +70,43 @@ const LOCKED_PLACEHOLDER: Mismatch = {
 
 export default function PreviewPage() {
   const router = useRouter();
-  const { currentScanId } = useScanStore();
+  const searchParams = useSearchParams();
+  const { currentScanId, setCurrentScanId } = useScanStore();
   const { user } = useAuthStore();
   const { initiatePayment, isLoading: paymentLoading } = usePayment();
+
+  const scanId = searchParams.get("scan_id") ?? currentScanId;
 
   const [preview, setPreview] = useState<ScanPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [payError, setPayError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!currentScanId) {
+    if (!scanId) {
       router.push(ROUTES.SCAN);
       return;
     }
+    if (scanId !== currentScanId) {
+      setCurrentScanId(scanId);
+    }
     scanApi
-      .getPreview(currentScanId)
+      .getPreview(scanId)
       .then((res) => {
         const data = res.data.data;
         if (data) setPreview(data);
       })
       .catch(() => router.push(ROUTES.SCAN))
       .finally(() => setLoading(false));
-  }, [currentScanId, router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanId, router]);
 
   async function handleUnlock() {
-    if (!currentScanId || !user?.email) return;
+    if (!scanId || !user?.email) return;
     setPayError(null);
     await initiatePayment(
-      currentScanId,
+      scanId,
       user.email,
-      () => router.push(ROUTES.SCAN_REPORT(currentScanId)),
+      () => router.push(ROUTES.SCAN_REPORT(scanId)),
       (err) => setPayError(err),
     );
   }

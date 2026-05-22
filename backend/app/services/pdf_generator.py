@@ -8,7 +8,7 @@ from typing import Optional
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm, mm
 from reportlab.platypus import (
     HRFlowable,
@@ -443,22 +443,6 @@ def generate_notice_reply_pdf(
         author="GSTSense",
     )
 
-    disclaimer_style = ParagraphStyle(
-        "disclaimer",
-        fontName="Helvetica",
-        fontSize=7,
-        textColor=NOTICE_RED,
-        leading=10,
-        alignment=TA_CENTER,
-    )
-    header_warning_style = ParagraphStyle(
-        "header_warning",
-        fontName="Helvetica-Bold",
-        fontSize=9,
-        textColor=NOTICE_RED,
-        leading=12,
-        alignment=TA_RIGHT,
-    )
     meta_label_style = ParagraphStyle(
         "meta_label",
         fontName="Helvetica-Bold",

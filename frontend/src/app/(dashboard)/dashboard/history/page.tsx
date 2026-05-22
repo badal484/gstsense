@@ -51,12 +51,12 @@ export default function ScanHistoryPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [paidFilter, setPaidFilter] = useState("");
 
-  async function loadScans(p: number) {
+  async function loadScans(p: number, sf: string) {
     setLoading(true);
     try {
-      const r = await api.get(API_ROUTES.SCANS.LIST, {
-        params: { page: p, limit: PAGE_SIZE },
-      });
+      const params: Record<string, unknown> = { page: p, limit: PAGE_SIZE };
+      if (sf) params.status_filter = sf;
+      const r = await api.get(API_ROUTES.SCANS.LIST, { params });
       const data = r.data.data;
       setScans(data.scans ?? []);
       setTotal(data.total ?? 0);
@@ -68,21 +68,20 @@ export default function ScanHistoryPage() {
   }
 
   useEffect(() => {
-    loadScans(page);
-  }, [page]);
+    loadScans(page, statusFilter);
+  }, [page, statusFilter]);
 
   async function downloadPdf(scanId: string) {
     setDownloadingId(scanId);
     try {
-      const r = await api.get(API_ROUTES.SCANS.DOWNLOAD(scanId), {
-        responseType: "blob",
-      });
-      const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `gstsense_report_${scanId.slice(0, 8)}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const r = await api.get(API_ROUTES.SCANS.DOWNLOAD(scanId));
+      const url = r.data?.download_url;
+      if (url) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `gstsense_report_${scanId.slice(0, 8)}.pdf`;
+        a.click();
+      }
     } catch {
       // ignore
     } finally {
@@ -90,9 +89,8 @@ export default function ScanHistoryPage() {
     }
   }
 
-  // Client-side filter on fetched data
+  // paidFilter is client-side only (backend has no paid filter param)
   const filtered = scans.filter((s) => {
-    if (statusFilter && s.status !== statusFilter) return false;
     if (paidFilter === "paid" && !s.is_paid) return false;
     if (paidFilter === "free" && s.is_paid) return false;
     return true;
@@ -112,7 +110,7 @@ export default function ScanHistoryPage() {
       <div className="flex flex-wrap gap-3">
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
           className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
         >
           <option value="">All Statuses</option>
@@ -244,7 +242,7 @@ export default function ScanHistoryPage() {
                                 )}
                                 {s.status === "completed" && !s.is_paid && (
                                   <Link
-                                    href={ROUTES.SCAN_REPORT(s.id)}
+                                    href={`${ROUTES.SCAN_PREVIEW}?scan_id=${s.id}`}
                                     className="text-xs font-semibold text-purple-700 hover:text-purple-800 whitespace-nowrap"
                                   >
                                     Unlock ₹499

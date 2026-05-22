@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -175,13 +174,12 @@ async def verify_payment(
     if payment.organization_id != org.id:
         raise AuthorizationError.resource_not_owned("payment")
 
-    # 2. Idempotent — already paid
-    if payment.status == PaymentStatus.paid:
-        return make_response(VerifyPaymentResponse(
-            success=True,
-            scan_id=request_body.scan_id,
-            message="Payment already verified.",
-        ))
+    # 2. Ensure payload scan_id matches the order's scan_id.
+    if payment.scan_id is None or payment.scan_id != request_body.scan_id:
+        raise ValidationError(
+            message="Payment order does not match the provided scan.",
+            code="VAL_001",
+        )
 
     # 3. Verify Razorpay signature
     valid = verify_razorpay_payment_signature(
@@ -195,18 +193,26 @@ async def verify_payment(
             code="VAL_001",
         )
 
-    # 4. Update payment
+    # 4. Idempotent — already paid (only after signature validation)
+    if payment.status == PaymentStatus.paid:
+        return make_response(VerifyPaymentResponse(
+            success=True,
+            scan_id=request_body.scan_id,
+            message="Payment already verified.",
+        ))
+
+    # 5. Update payment
     payment.status = PaymentStatus.paid
     payment.razorpay_payment_id = request_body.razorpay_payment_id
 
-    # 5. Mark scan paid
+    # 6. Mark scan paid
     await db.execute(
         update(Scan)
         .where(Scan.id == request_body.scan_id)
         .values(is_paid=True)
     )
 
-    # 6. Audit log
+    # 7. Audit log
     db.add(AuditLog(
         action="payment_completed",
         user_id=current_user.id,
@@ -220,7 +226,7 @@ async def verify_payment(
         },
     ))
 
-    # 7. Process referral commission — fault-tolerant, never blocks payment
+    # 8. Process referral commission — fault-tolerant, never blocks payment
     try:
         await process_payment_commission(db, payment)
     except Exception as exc:

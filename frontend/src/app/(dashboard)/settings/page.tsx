@@ -16,6 +16,8 @@ import {
 import api from "@/lib/api";
 import { API_ROUTES, PLAN_LIMITS, PLAN_PRICES, ROUTES } from "@/lib/constants";
 import { useAuthStore } from "@/store/authStore";
+import { useSubscriptionPayment } from "@/hooks/useSubscriptionPayment";
+import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Organization, User as UserType } from "@/types";
 
@@ -99,6 +101,8 @@ const inputCls =
 
 // ── Profile Tab ───────────────────────────────────────────────────────────────
 function ProfileTab({ user, org }: { user: UserType; org: Organization }) {
+  const { setUserAndOrg } = useAuthStore();
+  const { toast } = useToast();
   const [name, setName] = useState(user.full_name);
   const [phone, setPhone] = useState(user.phone ?? "");
   const [saving, setSaving] = useState(false);
@@ -110,10 +114,15 @@ function ProfileTab({ user, org }: { user: UserType; org: Organization }) {
     setSaved(false);
     try {
       await api.patch(API_ROUTES.AUTH.ME, { full_name: name, phone: phone || null });
+      const meResp = await api.get(API_ROUTES.AUTH.ME);
+      const { user: freshUser, organization: freshOrg } = meResp.data.data ?? {};
+      if (freshUser && freshOrg) setUserAndOrg(freshUser, freshOrg);
       setSaved(true);
+      toast({ title: "Saved", description: "Profile changes saved." });
       setTimeout(() => setSaved(false), 2500);
-    } catch {
-      // ignore
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to save profile.";
+      toast({ title: "Error", description: message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -176,6 +185,7 @@ type NotifPrefs = {
 };
 
 function NotificationsTab() {
+  const { toast } = useToast();
   const [prefs, setPrefs] = useState<NotifPrefs>({
     whatsapp_deadline_reminders: true,
     whatsapp_scan_complete: true,
@@ -189,7 +199,9 @@ function NotificationsTab() {
     api.get("/api/v1/preferences/").then((r) => {
       const data = r.data?.data ?? {};
       setPrefs((p) => ({ ...p, ...data }));
-    }).catch(() => {});
+    }).catch(() => {
+      toast({ title: "Error", description: "Failed to load notification preferences.", variant: "destructive" });
+    });
   }, []);
 
   async function handleToggle(key: keyof NotifPrefs, value: boolean) {
@@ -198,9 +210,11 @@ function NotificationsTab() {
     try {
       await api.patch("/api/v1/preferences/", { [key]: value });
       setSaved(true);
+      toast({ title: "Saved", description: "Notification preference updated." });
       setTimeout(() => setSaved(false), 1500);
     } catch {
       setPrefs((p) => ({ ...p, [key]: !value }));
+      toast({ title: "Error", description: "Could not save notification preference.", variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -274,6 +288,7 @@ function passwordStrength(pw: string): { label: string; color: string; width: st
 
 function SecurityTab() {
   const { logout } = useAuthStore();
+  const { toast } = useToast();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -305,15 +320,15 @@ function SecurityTab() {
         new_password: next,
       });
       setSaved(true);
+      toast({ title: "Saved", description: "Password updated successfully." });
       setCurrent("");
       setNext("");
       setConfirm("");
       setTimeout(() => setSaved(false), 2500);
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error
-          ?.message ?? "Failed to change password.";
-      setError(msg);
+      const message = err instanceof Error ? err.message : "Failed to change password.";
+      setError(message);
+      toast({ title: "Error", description: message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -326,6 +341,7 @@ function SecurityTab() {
       await api.delete("/api/v1/auth/me", { data: { confirmation: "DELETE" } });
       logout();
     } catch {
+      toast({ title: "Error", description: "Account deletion failed.", variant: "destructive" });
       setDeleting(false);
     }
   }
@@ -408,10 +424,7 @@ function SecurityTab() {
           </span>
         </div>
         <button
-          onClick={() => {
-            api.post(API_ROUTES.AUTH.LOGOUT).catch(() => {});
-            useAuthStore.getState().logout();
-          }}
+          onClick={logout}
           className="text-sm text-red-600 hover:text-red-700 font-medium"
         >
           Sign out of all sessions
@@ -460,20 +473,47 @@ type SubInfo = {
   amount_paise: number;
 } | null;
 
+const PLAN_HIERARCHY: Record<string, number> = { free: 0, smb: 1, growth: 2, ca_firm: 3 };
+
 function BillingTab({ org }: { org: Organization }) {
+  const { user } = useAuthStore();
+  const { initiateSubscription, isLoading: hookLoading } = useSubscriptionPayment();
   const planLabel = PLAN_LIMITS[org.plan]?.label ?? org.plan;
-  const isFree = org.plan === "free";
+  const currentTier = PLAN_HIERARCHY[org.plan] ?? 0;
+  const canUpgrade = currentTier < PLAN_HIERARCHY.ca_firm;
 
   const [sub, setSub] = useState<SubInfo>(undefined as unknown as SubInfo);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelMsg, setCancelMsg] = useState("");
+  const [upgradingPlan, setUpgradingPlan] = useState<string | null>(null);
+  const [upgradeMsg, setUpgradeMsg] = useState("");
 
   useEffect(() => {
     api.get("/api/v1/subscriptions/current")
       .then((r) => setSub(r.data?.data ?? null))
       .catch(() => setSub(null));
   }, []);
+
+  function handleUpgrade(plan: string, label: string) {
+    setUpgradingPlan(plan);
+    setUpgradeMsg("");
+    initiateSubscription(
+      plan,
+      user?.email ?? "",
+      label,
+      async () => {
+        setUpgradeMsg(`Successfully upgraded to ${label} plan.`);
+        const r = await api.get("/api/v1/subscriptions/current");
+        setSub(r.data?.data ?? null);
+        setUpgradingPlan(null);
+      },
+      (err) => {
+        setUpgradeMsg(err || "Upgrade failed. Please try again.");
+        setUpgradingPlan(null);
+      },
+    );
+  }
 
   async function handleCancel() {
     setCancelling(true);
@@ -505,6 +545,12 @@ function BillingTab({ org }: { org: Organization }) {
 
   return (
     <div className="space-y-8">
+      {upgradeMsg && (
+        <div className={`border rounded-xl px-4 py-3 text-sm ${upgradeMsg.includes("failed") || upgradeMsg.includes("Failed") ? "bg-red-50 border-red-200 text-red-800" : "bg-green-50 border-green-200 text-green-800"}`}>
+          {upgradeMsg}
+        </div>
+      )}
+
       {cancelMsg && (
         <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-800">
           {cancelMsg}
@@ -588,10 +634,10 @@ function BillingTab({ org }: { org: Organization }) {
         )}
       </Section>
 
-      {isFree && (
+      {canUpgrade && (
         <Section title="Upgrade Plan">
           <div className="space-y-3">
-            {upgrades.map((u) => (
+            {upgrades.filter((u) => PLAN_HIERARCHY[u.plan] > currentTier).map((u) => (
               <div
                 key={u.plan}
                 className="border border-gray-200 rounded-xl px-4 py-3 flex items-center justify-between hover:border-blue-300 transition-colors"
@@ -604,8 +650,16 @@ function BillingTab({ org }: { org: Organization }) {
                   <span className="text-sm font-bold text-gray-900">
                     ₹{u.price.toLocaleString()}/mo
                   </span>
-                  <button className="text-xs font-semibold bg-blue-700 text-white px-3 py-1.5 rounded-lg hover:bg-blue-800 flex items-center gap-1">
-                    Upgrade <ChevronRight className="w-3 h-3" />
+                  <button
+                    onClick={() => handleUpgrade(u.plan, u.label)}
+                    disabled={upgradingPlan !== null || hookLoading}
+                    className="text-xs font-semibold bg-blue-700 text-white px-3 py-1.5 rounded-lg hover:bg-blue-800 disabled:opacity-60 flex items-center gap-1"
+                  >
+                    {upgradingPlan === u.plan ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <>Upgrade <ChevronRight className="w-3 h-3" /></>
+                    )}
                   </button>
                 </div>
               </div>

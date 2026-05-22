@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { AlertTriangle, CheckCircle, X } from "lucide-react";
-import { LineChart, Line, ResponsiveContainer, Tooltip } from "recharts";
 import { cn } from "@/lib/utils";
 import { dashboardApi } from "@/lib/api";
+
+// Fully exclude recharts from SSR by importing the wrapper component dynamically
+const ScoreSparklineChart = dynamic(() => import("./ScoreSparklineChart"), { ssr: false });
 
 interface Factor {
   name: string;
@@ -137,23 +140,7 @@ function ScoreSparkline({ color }: { color: string }) {
 
   return (
     <div className="mt-3 space-y-1">
-      <ResponsiveContainer width="100%" height={48}>
-        <LineChart data={history}>
-          <Line
-            type="monotone"
-            dataKey="score"
-            stroke={color}
-            strokeWidth={2}
-            dot={false}
-            isAnimationActive={false}
-          />
-          <Tooltip
-            formatter={(val) => [`${val}`, "Score"]}
-            labelFormatter={(label) => String(label)}
-            contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #e5e7eb" }}
-          />
-        </LineChart>
-      </ResponsiveContainer>
+      <ScoreSparklineChart data={history} color={color} />
       <p className="text-xs text-gray-500 text-center">{trendText}</p>
     </div>
   );

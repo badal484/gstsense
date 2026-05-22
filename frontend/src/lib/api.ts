@@ -119,9 +119,11 @@ api.interceptors.response.use(
       isRefreshing = true
 
       try {
-        const resp = await api.post<ApiResponse<AuthTokens>>(
-          API_ROUTES.AUTH.REFRESH,
+        // Use raw axios (not the api instance) to avoid re-entering this interceptor
+        const resp = await axios.post<ApiResponse<AuthTokens>>(
+          `${API_BASE_URL}${API_ROUTES.AUTH.REFRESH}`,
           { refresh_token: refreshToken },
+          { headers: { "Content-Type": "application/json" } },
         )
         const tokens = resp.data.data
         if (!tokens) throw new Error("No tokens in refresh response")
@@ -274,6 +276,7 @@ export const subscriptionApi = {
   create: (plan: string): Promise<AxiosResponse<ApiResponse<{
     id: string; plan: string; status: string;
     razorpay_subscription_id: string | null;
+    razorpay_key_id: string | null;
     current_period_start: string; current_period_end: string;
     amount_paise: number;
   }>>> => api.post("/api/v1/subscriptions/create", { plan }),

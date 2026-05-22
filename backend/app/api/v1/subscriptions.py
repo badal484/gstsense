@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_org, get_current_user, get_db_session
 from app.core.config import settings
-from app.core.exceptions import ConflictError, ExternalServiceError, NotFoundError, ValidationError
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.audit_log import AuditLog
 from app.models.organization import Organization, Plan, SubscriptionStatus
@@ -62,6 +62,7 @@ class SubscriptionResponse(BaseModel):
     plan: str
     status: str
     razorpay_subscription_id: Optional[str]
+    razorpay_key_id: Optional[str]
     current_period_start: str
     current_period_end: str
     amount_paise: int
@@ -79,13 +80,13 @@ async def create_subscription(
     org: Organization = Depends(get_current_org),
     db: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[SubscriptionResponse]:
-    existing = await db.execute(
-        select(Subscription).where(
-            Subscription.organization_id == org.id,
-            Subscription.status == SubStatus.active,
-        )
+    # Check for any existing subscription (unique constraint: one row per org)
+    existing_result = await db.execute(
+        select(Subscription).where(Subscription.organization_id == org.id)
     )
-    if existing.scalar_one_or_none() is not None:
+    existing_sub = existing_result.scalar_one_or_none()
+
+    if existing_sub is not None and existing_sub.status == SubStatus.active:
         raise ConflictError(
             message="Organisation already has an active subscription.",
             code="CF_004",
@@ -119,26 +120,43 @@ async def create_subscription(
         logger.warning("razorpay_subscription_create_failed", error=str(exc))
 
     today = date.today()
-    sub = Subscription(
-        organization_id=org.id,
-        plan=SUB_PLAN_MAP[request_body.plan],
-        status=SubStatus.active,
-        razorpay_subscription_id=razorpay_sub_id,
-        current_period_start=today,
-        current_period_end=today + timedelta(days=30),
-    )
-    db.add(sub)
+    # If Razorpay returned a subscription ID, payment hasn't happened yet — don't
+    # activate the org plan now. The plan is activated by /verify after the user pays.
+    # If Razorpay is not configured (dev mode / no plan IDs set), activate immediately
+    # as a convenience so developers can test the feature without a live Razorpay account.
+    activate_immediately = razorpay_sub_id is None
 
-    org.plan = PLAN_MAP[request_body.plan]
-    org.subscription_status = SubscriptionStatus.active
-    org.billing_cycle_start = today
-    org.billing_cycle_end = today + timedelta(days=30)
+    if existing_sub is not None:
+        existing_sub.plan = SUB_PLAN_MAP[request_body.plan]
+        existing_sub.status = SubStatus.active
+        existing_sub.razorpay_subscription_id = razorpay_sub_id or existing_sub.razorpay_subscription_id
+        existing_sub.current_period_start = today
+        existing_sub.current_period_end = today + timedelta(days=30)
+        existing_sub.cancelled_at = None
+        existing_sub.cancellation_reason = None
+        sub = existing_sub
+    else:
+        sub = Subscription(
+            organization_id=org.id,
+            plan=SUB_PLAN_MAP[request_body.plan],
+            status=SubStatus.active,
+            razorpay_subscription_id=razorpay_sub_id,
+            current_period_start=today,
+            current_period_end=today + timedelta(days=30),
+        )
+        db.add(sub)
+
+    if activate_immediately:
+        org.plan = PLAN_MAP[request_body.plan]
+        org.subscription_status = SubscriptionStatus.active
+        org.billing_cycle_start = today
+        org.billing_cycle_end = today + timedelta(days=30)
 
     db.add(AuditLog(
         action="subscription_created",
         user_id=current_user.id,
         organization_id=org.id,
-        metadata_json={"plan": request_body.plan},
+        metadata_json={"plan": request_body.plan, "activate_immediately": activate_immediately},
     ))
     await db.commit()
     await db.refresh(sub)
@@ -149,6 +167,7 @@ async def create_subscription(
             plan=sub.plan.value,
             status=sub.status.value,
             razorpay_subscription_id=sub.razorpay_subscription_id,
+            razorpay_key_id=settings.RAZORPAY_KEY_ID if razorpay_sub_id else None,
             current_period_start=str(sub.current_period_start),
             current_period_end=str(sub.current_period_end),
             amount_paise=amount_paise,
@@ -167,7 +186,10 @@ async def get_current_subscription(
     db: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[Optional[SubscriptionResponse]]:
     result = await db.execute(
-        select(Subscription).where(Subscription.organization_id == org.id)
+        select(Subscription)
+        .where(Subscription.organization_id == org.id)
+        .order_by(Subscription.created_at.desc())
+        .limit(1)
     )
     sub = result.scalar_one_or_none()
     if sub is None:
@@ -179,6 +201,7 @@ async def get_current_subscription(
             plan=sub.plan.value,
             status=sub.status.value,
             razorpay_subscription_id=sub.razorpay_subscription_id,
+            razorpay_key_id=None,
             current_period_start=str(sub.current_period_start),
             current_period_end=str(sub.current_period_end),
             amount_paise=PLAN_PRICES_PAISE.get(sub.plan.value, 0),

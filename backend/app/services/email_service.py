@@ -1,5 +1,4 @@
 from decimal import Decimal
-from typing import Optional
 
 import httpx
 
@@ -107,9 +106,9 @@ class EmailService:
         urgency = ""
         if total_mismatches > 0:
             urgency = (
-                f"<p style='color:#E24B4A;'><strong>⚠️ Action Required:</strong> "
-                f"These mismatches can trigger automated Rule 88C notices from the GST department. "
-                f"Please review and correct them before your next filing deadline.</p>"
+                "<p style='color:#E24B4A;'><strong>⚠️ Action Required:</strong> "
+                "These mismatches can trigger automated Rule 88C notices from the GST department. "
+                "Please review and correct them before your next filing deadline.</p>"
             )
         body = f"""
         <h2>Your {month_label} Scan is Complete</h2>

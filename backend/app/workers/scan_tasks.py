@@ -1,7 +1,9 @@
 import asyncio
+import functools
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, Optional
 
 from celery import Task
 from sqlalchemy import select, update
@@ -19,8 +21,6 @@ from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
 
-
-from typing import Any, Optional
 
 def run_async(coro: Any) -> Any:
     """Run an async coroutine from a sync Celery task using a fresh event loop."""
@@ -178,17 +178,18 @@ async def _process_scan_async(
 
         # ------------------------------------------------------------------
         # STEP 4 & 5: Parse files (validation errors → no retry)
+        # Run in thread pool so the event loop stays responsive to status polls.
         # ------------------------------------------------------------------
         from app.core.exceptions import ValidationError as GSTValidationError
 
         try:
-            gstr1_result = parse_gstr1(gstr1_bytes)
+            gstr1_result = await asyncio.to_thread(parse_gstr1, gstr1_bytes)
         except GSTValidationError as exc:
             await _mark_scan_failed(scan_id, exc.message)
             return {"status": "failed", "reason": exc.message}
 
         try:
-            gstr3b_result = parse_gstr3b(gstr3b_bytes)
+            gstr3b_result = await asyncio.to_thread(parse_gstr3b, gstr3b_bytes)
         except GSTValidationError as exc:
             await _mark_scan_failed(scan_id, exc.message)
             return {"status": "failed", "reason": exc.message}
@@ -196,12 +197,15 @@ async def _process_scan_async(
         all_warnings = gstr1_result.warnings + gstr3b_result.warnings
 
         # ------------------------------------------------------------------
-        # STEP 6: Reconcile
+        # STEP 6: Reconcile (CPU-bound — thread pool)
         # ------------------------------------------------------------------
-        recon = reconcile(
-            gstr1_result.dataframe,
-            gstr3b_result.dataframe,
-            warnings=all_warnings,
+        recon = await asyncio.to_thread(
+            functools.partial(
+                reconcile,
+                gstr1_result.dataframe,
+                gstr3b_result.dataframe,
+                warnings=all_warnings,
+            )
         )
         logger.info(
             "reconciliation_complete",
@@ -239,7 +243,6 @@ async def _process_scan_async(
                 return {"status": "failed", "reason": "invoice_limit_reached"}
             org_obj.invoices_used_this_month = new_usage
 
-        mismatch_models: list[Mismatch] = []
         for m in recon.mismatches:
             mismatch = Mismatch(
                 scan_id=scan_uuid,
@@ -329,7 +332,7 @@ async def _process_scan_async(
                 mismatches=pdf_mismatches,
                 generated_at=datetime.now(tz=timezone.utc),
             )
-            pdf_bytes = generate_mismatch_report(report_data)
+            pdf_bytes = await asyncio.to_thread(generate_mismatch_report, report_data)
             pdf_key = s3_service.build_scan_pdf_key(org_id, scan_id)
             await s3_service.upload_file(
                 pdf_bytes, pdf_key, content_type="application/pdf"

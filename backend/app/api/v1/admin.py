@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db_session, require_admin
 from app.core.logging import get_logger
 from app.models.ca_firm import ReferralCommission, ReferralCommissionStatus
-from app.models.organization import Organization, SubscriptionStatus
+from app.models.organization import Organization
 from app.models.payment import Payment, PaymentStatus
 from app.models.scan import Scan
 from app.models.subscription import Subscription

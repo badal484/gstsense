@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
 GSTIN_PATTERN = re.compile(
     r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$"
@@ -173,6 +173,9 @@ class OrganizationResponse(BaseModel):
     invoice_limit: int
     invoices_used_this_month: int
     has_active_subscription: bool
+    is_invoice_limit_reached: bool = False
+    billing_cycle_start: Optional[str] = None
+    billing_cycle_end: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -180,6 +183,19 @@ class OrganizationResponse(BaseModel):
     @classmethod
     def enum_to_str(cls, v: Any) -> str:
         return str(v.value) if hasattr(v, "value") else str(v)
+
+    @field_validator("billing_cycle_start", "billing_cycle_end", mode="before")
+    @classmethod
+    def date_to_str(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return str(v)
+
+    @model_validator(mode="after")
+    def compute_limit_reached(self) -> "OrganizationResponse":
+        if self.invoice_limit > 0:
+            self.is_invoice_limit_reached = self.invoices_used_this_month >= self.invoice_limit
+        return self
 
 
 class UserWithOrgResponse(BaseModel):

@@ -111,7 +111,7 @@ export default function ReportPage() {
         const data = res.data.data;
         if (data) setReport(data);
       })
-      .catch(() => router.push(ROUTES.DASHBOARD))
+      .catch(() => router.push(`${ROUTES.SCAN_PREVIEW}?scan_id=${scanId}`))
       .finally(() => setLoading(false));
   }, [scanId, router]);
 

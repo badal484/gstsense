@@ -39,6 +39,7 @@ export default function NoticeReviewPage() {
   const [approving, setApproving] = useState(false);
   const [approved, setApproved] = useState(false);
   const [approveError, setApproveError] = useState("");
+  const [icaiNumber, setIcaiNumber] = useState("");
   const [comment, setComment] = useState("");
 
   useEffect(() => {
@@ -61,11 +62,16 @@ export default function NoticeReviewPage() {
 
   async function handleApprove() {
     if (!token) return;
+    if (!icaiNumber.trim()) {
+      setApproveError("ICAI membership number is required to approve.");
+      return;
+    }
     setApproving(true);
     setApproveError("");
     try {
       await axios.post(`${API_BASE_URL}/api/v1/notices/review/${token}/approve`, {
-        comment: comment.trim() || null,
+        icai_number: icaiNumber.trim(),
+        comment: comment.trim() || "",
       });
       setApproved(true);
     } catch (err: unknown) {
@@ -247,6 +253,21 @@ export default function NoticeReviewPage() {
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
             Your Decision
           </h2>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              ICAI Membership Number <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={icaiNumber}
+              onChange={(e) => { setIcaiNumber(e.target.value.toUpperCase()); setApproveError(""); }}
+              placeholder="e.g. MRN123456 or FRN100001W"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Required for legal compliance. Your membership number will be recorded on the approval.
+            </p>
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Comment (optional)

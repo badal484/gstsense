@@ -130,10 +130,7 @@ export default function NoticesPage() {
       if (fileRef.current) fileRef.current.value = "";
       await loadNotices();
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: { message?: string } } } })
-          ?.response?.data?.error?.message || "Upload failed. Please try again.";
-      setUploadError(msg);
+      setUploadError(err instanceof Error ? err.message : "Upload failed. Please try again.");
     } finally {
       setUploading(false);
     }

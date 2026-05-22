@@ -71,9 +71,18 @@ export function usePayment() {
         const resp = await paymentApi.createOrder(scanId)
         const order = resp.data.data
         if (!order) throw new Error("Failed to create payment order")
+        const envKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID
+        const key = envKey || order.key_id
+        if (!key) {
+          const msg = "Razorpay key missing. Set NEXT_PUBLIC_RAZORPAY_KEY_ID in .env.local."
+          setError(msg)
+          onFailure(msg)
+          setIsLoading(false)
+          return
+        }
 
         const rzp = new window.Razorpay({
-          key: order.key_id,
+          key,
           amount: order.amount,
           currency: "INR",
           name: "GSTSense",

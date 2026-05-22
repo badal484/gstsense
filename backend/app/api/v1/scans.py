@@ -4,11 +4,11 @@ from typing import Optional
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, UploadFile, status
-from app.workers.scan_tasks import _process_scan_async
+from app.workers.scan_tasks import _mark_scan_failed, _process_scan_async
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_client_ip, get_current_org, get_current_user, get_db_session, get_request_id
+from app.api.deps import get_client_ip, get_current_org, get_current_user, get_db_session
 from app.core.config import settings
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.logging import get_logger
@@ -27,6 +27,7 @@ from app.schemas.scan import (
     ScanStatusResponse,
     ScanUploadResponse,
 )
+from app.services.parser import validate_excel_bytes
 from app.services.s3_service import s3_service
 from app.workers.scan_tasks import process_scan_task
 
@@ -103,6 +104,10 @@ async def upload_scan(
             len(gstr3b_bytes) / (1024 * 1024), settings.MAX_FILE_SIZE_MB
         )
 
+    # Validate actual bytes (not just extension) to block non-Excel uploads.
+    validate_excel_bytes(gstr1_bytes)
+    validate_excel_bytes(gstr3b_bytes)
+
     # ---- 3. Invoice limit check ----
     if org.is_invoice_limit_reached:
         raise AuthorizationError.plan_upgrade_required(
@@ -168,7 +173,16 @@ async def upload_scan(
 
     # ---- 10. Queue task (direct background task in dev, Celery in prod) ----
     if settings.is_development:
-        background_tasks.add_task(_process_scan_async, str(scan_id), str(org.id), "dev-task")
+        async def _dev_task() -> None:
+            try:
+                await _process_scan_async(str(scan_id), str(org.id), "dev-task")
+            except Exception as exc:
+                logger.error("dev_scan_task_failed", scan_id=str(scan_id), error=str(exc))
+                try:
+                    await _mark_scan_failed(str(scan_id), str(exc)[:1000])
+                except Exception:
+                    pass
+        background_tasks.add_task(_dev_task)
     else:
         process_scan_task.apply_async(
             args=[str(scan_id), str(org.id)],
@@ -352,7 +366,12 @@ async def download_scan_report(
 
     if not scan.pdf_s3_key:
         logger.info("pdf_not_ready_queuing_generation", scan_id=str(scan_id))
-        return {"status": "pending", "message": "PDF is being generated. Please try again in a moment."}
+        message = "PDF is being generated. Please try again in a moment."
+        return {
+            "status": "pending",
+            "message": message,
+            "data": {"status": "pending", "message": message},
+        }
 
     download_url = await s3_service.generate_presigned_url(
         s3_key=scan.pdf_s3_key,
@@ -371,7 +390,14 @@ async def download_scan_report(
     )
     await db.commit()
 
-    return {"download_url": download_url}
+    # Backward-compatible response:
+    # - top-level `download_url` supports existing frontend code.
+    # - `data.download_url` supports standard API response parsing.
+    return {
+        "status": "success",
+        "data": {"download_url": download_url},
+        "download_url": download_url,
+    }
 
 
 @router.get(

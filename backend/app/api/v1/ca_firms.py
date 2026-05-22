@@ -5,14 +5,16 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
-from sqlalchemy import func, select, update
+from fastapi import APIRouter, Depends, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_org, get_current_user, get_db_session, require_plan
+from pydantic import BaseModel as _BM
+from app.api.deps import get_current_user, get_db_session, require_plan
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.audit_log import AuditLog
+from app.models.bank_details import CABankDetails
 from app.models.ca_firm import (
     CAClientRelationship,
     CAClientStatus,
@@ -474,6 +476,7 @@ async def remove_client(
 )
 async def list_commissions(
     commission_status: Optional[str] = None,
+    organization_id: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     org: Organization = Depends(require_plan("ca_firm")),
     db: AsyncSession = Depends(get_db_session),
@@ -483,6 +486,11 @@ async def list_commissions(
     q = select(ReferralCommission).where(ReferralCommission.ca_firm_id == ca_firm.id)
     if commission_status in ("pending", "paid", "cancelled"):
         q = q.where(ReferralCommission.status == ReferralCommissionStatus(commission_status))
+    if organization_id:
+        try:
+            q = q.where(ReferralCommission.organization_id == uuid.UUID(organization_id))
+        except ValueError:
+            pass
 
     result = await db.execute(q.order_by(ReferralCommission.created_at.desc()).limit(100))
     commissions = [_build_commission_response(c) for c in result.scalars().all()]
@@ -667,9 +675,6 @@ async def get_branding(
 # ---------------------------------------------------------------------------
 # Bank Details endpoints
 # ---------------------------------------------------------------------------
-
-from pydantic import BaseModel as _BM
-from app.models.bank_details import CABankDetails
 
 
 class BankDetailsRequest(_BM):

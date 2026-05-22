@@ -154,7 +154,6 @@ async def get_itc_summary(
     )
     scan = result.scalar_one_or_none()
 
-    from app.models.organization import Plan
     requires_upgrade = org.plan.value not in ("growth", "ca_firm")
 
     if scan is None:

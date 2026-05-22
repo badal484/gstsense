@@ -46,14 +46,17 @@ export default function ProcessingPage() {
 
     startPolling(
       scanId,
-      () => router.push(ROUTES.SCAN_PREVIEW),
+      () => router.push(`${ROUTES.SCAN_PREVIEW}?scan_id=${scanId}`),
       (err) => {
         setFailed(true);
         setFailReason(err);
       },
     );
 
-    return () => stopPolling();
+    return () => {
+    pollingStarted.current = false; // reset so StrictMode remount can restart polling
+    stopPolling();
+  };
   }, [scanId, router, startPolling, stopPolling]);
 
   useEffect(() => {

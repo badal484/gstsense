@@ -20,7 +20,7 @@ export function useScanUpload() {
         if (!scanId) throw new Error("No scan ID returned")
         setCurrentScanId(scanId)
         setStatus("uploaded")
-        router.push(ROUTES.SCAN_PROCESSING)
+        router.push(`${ROUTES.SCAN_PROCESSING}?scan_id=${scanId}`)
         return scanId
       } catch (err) {
         const message =
@@ -63,7 +63,7 @@ export function useScanPolling() {
       setIsPolling(true)
       pollCountRef.current = 0
 
-      intervalRef.current = setInterval(async () => {
+      const poll = async () => {
         pollCountRef.current += 1
 
         if (pollCountRef.current >= MAX_POLLS) {
@@ -87,7 +87,11 @@ export function useScanPolling() {
         } catch {
           // transient network error — keep polling
         }
-      }, POLL_INTERVAL_MS)
+      }
+
+      // Check immediately on mount so a completed scan redirects without waiting
+      poll()
+      intervalRef.current = setInterval(poll, POLL_INTERVAL_MS)
     },
     [setStatus, stopPolling],
   )

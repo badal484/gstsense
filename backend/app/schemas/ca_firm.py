@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 _ICAI_FIRM_PATTERN = re.compile(r"^[A-Z0-9]{3,20}$")
 _HEX_COLOR_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -13,7 +13,7 @@ _SUBDOMAIN_PATTERN = re.compile(r"^[a-z0-9][a-z0-9\-]{1,61}[a-z0-9]$")
 
 class CAFirmCreate(BaseModel):
     firm_name: str = Field(..., min_length=2, max_length=255)
-    icai_firm_registration_number: str = Field(..., min_length=3, max_length=50)
+    icai_firm_registration_number: Optional[str] = Field(None, min_length=3, max_length=50)
     primary_ca_name: str = Field(..., min_length=2, max_length=255)
     icai_membership_number: str = Field(..., min_length=4, max_length=50)
     phone: Optional[str] = Field(None, max_length=20)
@@ -21,6 +21,19 @@ class CAFirmCreate(BaseModel):
     state: str = Field(..., min_length=2, max_length=100)
     white_label_subdomain: Optional[str] = Field(None, max_length=63)
     primary_color: str = Field(default="#534AB7", max_length=7)
+
+    @model_validator(mode="before")
+    @classmethod
+    def backfill_firm_registration_number(cls, values: dict) -> dict:
+        # Backward compatibility: allow older clients that send only
+        # `icai_membership_number` to register a CA firm.
+        if (
+            isinstance(values, dict)
+            and not values.get("icai_firm_registration_number")
+            and values.get("icai_membership_number")
+        ):
+            values["icai_firm_registration_number"] = str(values["icai_membership_number"])
+        return values
 
     @field_validator("icai_firm_registration_number")
     @classmethod

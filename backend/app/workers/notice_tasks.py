@@ -1,7 +1,6 @@
 """Celery task for GST notice reply draft generation."""
 import asyncio
 import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 from celery import Task
@@ -63,7 +62,7 @@ async def _mark_draft_failed(notice_id: str, error_message: str) -> None:
             update(Notice)
             .where(Notice.id == uuid.UUID(notice_id))
             .values(
-                draft_status=DraftStatus.pending,
+                draft_status=DraftStatus.failed,
                 draft_warnings=["Draft generation failed. Please contact support."],
             )
         )

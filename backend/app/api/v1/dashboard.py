@@ -3,7 +3,6 @@
 import calendar
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -14,10 +13,10 @@ from app.api.deps import get_current_org, get_current_user, get_db_session
 from app.core.logging import get_logger
 from app.models.compliance_score import ComplianceScoreRecord
 from app.models.notice import DraftStatus, Notice
-from app.models.organization import Organization, SubscriptionStatus
+from app.models.organization import Organization
 from app.models.scan import Scan, ScanStatus
 from app.schemas.common import ApiResponse, make_response
-from app.services.compliance_score import ComplianceScore, calculate_org_compliance_score, get_compliance_grade
+from app.services.compliance_score import calculate_org_compliance_score
 from fastapi import Query as FQuery
 from app.models.user import User
 
@@ -104,8 +103,9 @@ async def get_dashboard(
     )
     stored_score = stored_q.scalar_one_or_none()
 
+    # Always calculate for fresh factors/recommendations; use stored record only for history
+    compliance = await calculate_org_compliance_score(org_id, db)
     if stored_score is None:
-        compliance = await calculate_org_compliance_score(org_id, db)
         new_record = ComplianceScoreRecord(
             organization_id=org.id,
             score=compliance.score,
@@ -113,17 +113,6 @@ async def get_dashboard(
         )
         db.add(new_record)
         await db.commit()
-    else:
-        # Re-use stored score — avoid recalculating on every page load
-        _, color = get_compliance_grade(stored_score.score)
-        compliance = ComplianceScore(
-            score=stored_score.score,
-            grade=stored_score.grade,
-            color=color,
-            factors=[],
-            recommendations=[],
-            trend="stable",
-        )
 
     # 2. All-time usage stats
     all_scans_q = await db.execute(
@@ -194,7 +183,7 @@ async def get_dashboard(
     notices_q = await db.execute(
         select(func.count()).where(
             Notice.organization_id == org.id,
-            Notice.draft_status.in_([DraftStatus.pending, DraftStatus.generated]),
+            Notice.draft_status.in_([DraftStatus.pending, DraftStatus.generated, DraftStatus.reviewed]),
         )
     )
     pending_notices = notices_q.scalar() or 0

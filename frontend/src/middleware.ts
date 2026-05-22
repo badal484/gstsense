@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/", "/login", "/signup", "/reset-password", "/verify-email", "/forgot-password"];
+const PUBLIC_PATHS = ["/", "/login", "/signup", "/reset-password", "/verify-email", "/forgot-password", "/notice/review"];
 const AUTH_PATHS = ["/login", "/signup"];
 
 export function middleware(request: NextRequest): NextResponse {
@@ -26,16 +26,20 @@ export function middleware(request: NextRequest): NextResponse {
     response.headers.set("x-ca-slug", caSlug);
   }
 
-  const isPublicPath = PUBLIC_PATHS.some(
-    (p) => pathname === p || pathname.startsWith("/api/") || pathname.startsWith("/privacy") || pathname.startsWith("/terms")
-  );
+  const isPublicPath =
+    pathname.startsWith("/api/") ||
+    pathname.startsWith("/privacy") ||
+    pathname.startsWith("/terms") ||
+    pathname.startsWith("/notice/review") ||
+    PUBLIC_PATHS.some((p) => pathname === p);
   const isAuthPath = AUTH_PATHS.some((p) => pathname === p);
   const isDashboardPath =
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/scan") ||
     pathname.startsWith("/notices") ||
     pathname.startsWith("/settings") ||
-    pathname.startsWith("/itc");
+    pathname.startsWith("/itc") ||
+    pathname.startsWith("/ca");
 
   if (isDashboardPath && !token) {
     const loginUrl = new URL("/login", request.url);

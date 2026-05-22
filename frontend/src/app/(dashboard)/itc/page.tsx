@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   TrendingUp,
   CheckCircle,
@@ -16,7 +15,8 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
-import { ROUTES, ACCEPTED_FILE_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/constants";
+import { useSubscriptionPayment } from "@/hooks/useSubscriptionPayment";
+import { ACCEPTED_FILE_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/constants";
 import { formatRupees } from "@/lib/utils";
 
 interface ITCSummary {
@@ -188,8 +188,8 @@ function IssueCard({ issue }: { issue: ITCIssue }) {
 type FilterTab = "all" | "unclaimed" | "excess_claimed" | "supplier_not_filed";
 
 export default function ITCPage() {
-  const router = useRouter();
-  const { organization } = useAuthStore();
+  const { organization, user } = useAuthStore();
+  const { initiateSubscription, isLoading: upgrading, error: upgradeError } = useSubscriptionPayment();
 
   const [summary, setSummary] = useState<ITCSummary | null>(null);
   const [gstr3bFile, setGstr3bFile] = useState<File | null>(null);
@@ -199,34 +199,52 @@ export default function ITCPage() {
   const [pollingId, setPollingId] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<ITCAnalysis | null>(null);
   const [filter, setFilter] = useState<FilterTab>("all");
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     api.get("/api/v1/itc/summary/latest")
       .then((r) => setSummary(r.data.data))
       .catch(() => {});
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    };
   }, []);
 
   const pollStatus = useCallback(async (scanId: string) => {
-    const interval = setInterval(async () => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    pollIntervalRef.current = setInterval(async () => {
       try {
         const r = await api.get(`/api/v1/itc/${scanId}/status`);
         const status = r.data.data?.status;
         if (status === "completed") {
-          clearInterval(interval);
+          clearInterval(pollIntervalRef.current!);
+          pollIntervalRef.current = null;
           setPollingId(null);
           const ar = await api.get(`/api/v1/itc/${scanId}/analysis`);
           setAnalysis(ar.data.data);
         } else if (status === "failed") {
-          clearInterval(interval);
+          clearInterval(pollIntervalRef.current!);
+          pollIntervalRef.current = null;
           setPollingId(null);
           setUploadError("ITC analysis failed. Please check your files and try again.");
         }
       } catch {
-        clearInterval(interval);
+        clearInterval(pollIntervalRef.current!);
+        pollIntervalRef.current = null;
         setPollingId(null);
       }
     }, 3000);
   }, []);
+
+  function handleUpgradeToGrowth() {
+    initiateSubscription(
+      "growth",
+      user?.email ?? "",
+      "Growth",
+      () => {},
+      () => {},
+    );
+  }
 
   async function handleAnalyze() {
     if (!gstr3bFile || !gstr2bFile) return;
@@ -298,12 +316,23 @@ export default function ITCPage() {
             ))}
           </div>
 
+          {upgradeError && (
+            <div className="mb-3 bg-red-500/20 border border-red-400/30 text-red-100 text-sm rounded-xl px-4 py-3">
+              {upgradeError}
+            </div>
+          )}
+
           <button
-            onClick={() => router.push(ROUTES.SETTINGS)}
-            className="w-full flex items-center justify-center gap-2 bg-white text-purple-700 font-bold py-3.5 rounded-2xl hover:bg-purple-50 transition-colors"
+            onClick={handleUpgradeToGrowth}
+            disabled={upgrading}
+            className="w-full flex items-center justify-center gap-2 bg-white text-purple-700 font-bold py-3.5 rounded-2xl hover:bg-purple-50 disabled:opacity-70 transition-colors"
           >
-            <Lock className="w-5 h-5" />
-            Upgrade to Growth — ₹2,499/month
+            {upgrading ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <Lock className="w-5 h-5" />
+            )}
+            {upgrading ? "Activating…" : "Upgrade to Growth — ₹2,499/month"}
           </button>
         </div>
       </div>

@@ -1,6 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  webpack: (config, { dev }) => {
+    // Mitigate intermittent dev-time module runtime failures caused by
+    // filesystem cache corruption in .next on some local environments.
+    if (dev) {
+      config.cache = false;
+    }
+    return config;
+  },
 
   images: {
     remotePatterns: [

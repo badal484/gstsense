@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Response, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -132,8 +133,6 @@ async def upload_notice(
     # Parse due date
     due_date = None
     if details.get("response_due_date"):
-        from datetime import date as _date
-        import re as _re
         raw_date = str(details["response_due_date"])
         for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%d/%m/%y"):
             try:
@@ -173,7 +172,6 @@ async def upload_notice(
 
     # Queue draft generation
     if settings.is_development:
-        from app.workers.notice_tasks import _generate_draft_async
         background_tasks.add_task(
             _run_draft_in_background, str(notice_id), str(org.id)
         )
@@ -251,6 +249,11 @@ async def get_notice_draft(
         raise ValidationError(
             message="Draft is still being generated. Please try again in a moment.",
             code="VAL_005",
+        )
+    if notice.draft_status == DraftStatus.failed:
+        raise ValidationError(
+            message="Draft generation failed for this notice. Please re-upload the notice or contact support.",
+            code="VAL_006",
         )
 
     db.add(AuditLog(
@@ -459,7 +462,7 @@ async def share_draft(
     db: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[dict]:
     result = await db.execute(select(Notice).where(Notice.id == notice_id))
-    notice = _assert_notice_owner(result.scalar_one_or_none(), notice_id, org.id)
+    _assert_notice_owner(result.scalar_one_or_none(), notice_id, org.id)
 
     raw_token = generate_secure_token(32)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
@@ -536,9 +539,6 @@ async def list_notices(
 # Public review endpoints (no authentication required)
 # ---------------------------------------------------------------------------
 
-class PublicReviewResponse(ApiResponse[dict]):
-    pass
-
 
 @router.get(
     "/review/{token}",
@@ -584,8 +584,9 @@ async def get_notice_for_review(
     })
 
 
-class PublicApproveRequest(ApiResponse[dict]):
-    pass
+class PublicApproveRequest(BaseModel):
+    icai_number: str = Field(default="", max_length=50)
+    comment: str = Field(default="", max_length=1000)
 
 
 @router.post(
@@ -596,7 +597,7 @@ class PublicApproveRequest(ApiResponse[dict]):
 )
 async def approve_via_share_link(
     token: str,
-    body: dict,
+    body: PublicApproveRequest,
     db: AsyncSession = Depends(get_db_session),
     ip: Optional[str] = Depends(get_client_ip),
 ) -> ApiResponse[dict]:
@@ -615,8 +616,8 @@ async def approve_via_share_link(
         from fastapi import HTTPException
         raise HTTPException(status_code=410, detail="This review link has expired.")
 
-    icai_number = str(body.get("icai_number", "")).strip()
-    comment = str(body.get("comment", "")).strip()
+    icai_number = body.icai_number.strip()
+    comment = body.comment.strip()
 
     notice.draft_status = DraftStatus.approved
     if icai_number:

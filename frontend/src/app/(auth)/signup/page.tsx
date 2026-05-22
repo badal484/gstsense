@@ -187,6 +187,11 @@ export default function SignupPage() {
               {fieldErrors.gstin && (
                 <p className="mt-1 text-xs text-red-600">{fieldErrors.gstin}</p>
               )}
+              {!fieldErrors.gstin && gstin && gstinValid !== null && (
+                <p className={`mt-1 text-xs ${gstinValid ? "text-green-600" : "text-red-600"}`}>
+                  {gstinValid ? "✓ Valid GSTIN" : "✗ Invalid GSTIN format"}
+                </p>
+              )}
               {!fieldErrors.gstin && (
                 <p className="mt-1 text-xs text-gray-400">15-character GST Identification Number</p>
               )}

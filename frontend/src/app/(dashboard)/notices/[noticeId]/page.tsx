@@ -24,7 +24,7 @@ interface NoticeDetail {
   demand_amount: string | null;
   tax_period: string | null;
   response_due_date: string | null;
-  draft_status: "pending" | "generated" | "reviewed" | "approved";
+  draft_status: "pending" | "generated" | "reviewed" | "approved" | "failed";
   icai_membership_number: string | null;
   created_at: string;
 }
@@ -133,7 +133,7 @@ export default function NoticeDetailPage() {
       const updated = await loadNotice();
       if (updated && updated.draft_status !== "pending") {
         clearInterval(interval);
-        loadDraft();
+        if (updated.draft_status !== "failed") loadDraft();
       }
     }, 5000);
     return () => clearInterval(interval);
@@ -154,10 +154,7 @@ export default function NoticeDetailPage() {
       await loadNotice();
       await loadDraft();
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: { message?: string } } } })
-          ?.response?.data?.error?.message || "Verification failed. Check the number and retry.";
-      setVerifyError(msg);
+      setVerifyError(err instanceof Error ? err.message : "Verification failed. Check the number and retry.");
     } finally {
       setVerifying(false);
     }
@@ -176,10 +173,7 @@ export default function NoticeDetailPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: { message?: string } } } })
-          ?.response?.data?.error?.message || "Download failed.";
-      alert(msg);
+      alert(err instanceof Error ? err.message : "Download failed.");
     } finally {
       setDownloading(false);
     }
@@ -325,8 +319,20 @@ export default function NoticeDetailPage() {
         </div>
       )}
 
+      {/* Draft status: failed */}
+      {notice.draft_status === "failed" && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-10 text-center">
+          <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-red-900">Draft generation failed</h2>
+          <p className="text-red-700 text-sm mt-1">
+            We could not generate a draft for this notice. Please contact support or try uploading
+            the notice again.
+          </p>
+        </div>
+      )}
+
       {/* Draft content */}
-      {notice.draft_status !== "pending" && (
+      {notice.draft_status !== "pending" && notice.draft_status !== "failed" && (
         <>
           {/* Disclaimer */}
           <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-4 flex gap-3">

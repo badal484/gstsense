@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 
 import anthropic
 import openai

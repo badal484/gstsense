@@ -1,8 +1,7 @@
 import hashlib
-from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -208,6 +207,8 @@ async def logout(
         action="user_logged_out",
         user_id=current_user.id,
     )
+    # Immediately invalidate access tokens for this user.
+    await add_user_to_blocklist(str(current_user.id))
     await db.commit()
     return make_response({"message": "Logged out successfully"})
 
@@ -358,7 +359,7 @@ async def delete_account(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[dict]:
-    from sqlalchemy import delete as sa_delete, update as sa_update
+    from sqlalchemy import delete as sa_delete
     from app.models.refresh_token import RefreshToken as RT
     from app.models.user_preferences import UserPreferences
 

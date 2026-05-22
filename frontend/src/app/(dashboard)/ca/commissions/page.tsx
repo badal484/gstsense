@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import {
   CheckCircle,
   Clock,
-  DollarSign,
+  IndianRupee,
   Loader2,
 } from "lucide-react";
 import api from "@/lib/api";
@@ -121,7 +121,7 @@ export default function CommissionsPage() {
           </div>
           <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm col-span-2 lg:col-span-1">
             <div className="flex items-center gap-2 mb-2">
-              <DollarSign className="w-4 h-4 text-blue-600" />
+              <IndianRupee className="w-4 h-4 text-blue-600" />
               <span className="text-sm font-semibold text-gray-700">All Time</span>
             </div>
             <p className="text-2xl font-bold text-blue-700">
@@ -159,7 +159,7 @@ export default function CommissionsPage() {
 
       {!loading && commissions.length === 0 && (
         <div className="bg-white border border-gray-100 rounded-2xl p-14 text-center shadow-sm">
-          <DollarSign className="w-14 h-14 text-gray-300 mx-auto mb-4" />
+          <IndianRupee className="w-14 h-14 text-gray-300 mx-auto mb-4" />
           <h2 className="text-lg font-bold text-gray-900 mb-2">No commissions yet</h2>
           <p className="text-gray-500 text-sm max-w-sm mx-auto">
             Commissions appear automatically when your clients make subscription payments.

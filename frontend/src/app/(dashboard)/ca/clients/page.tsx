@@ -30,7 +30,6 @@ export default function CAClientsPage() {
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [gstin, setGstin] = useState("");
-  const [commissionRate, setCommissionRate] = useState("0.15");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState("");
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -62,17 +61,13 @@ export default function CAClientsPage() {
     try {
       await api.post(API_ROUTES.CA_FIRMS.CLIENTS, {
         gstin: g,
-        commission_rate: parseFloat(commissionRate),
+        commission_rate: 0.15,
       });
       setShowAddModal(false);
       setGstin("");
-      setCommissionRate("0.15");
       await loadClients();
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error
-          ?.message || "Failed to add client. Please check the GSTIN and try again.";
-      setAddError(msg);
+      setAddError(err instanceof Error ? err.message : "Failed to add client. Please try again.");
     } finally {
       setAdding(false);
     }
@@ -207,11 +202,7 @@ export default function CAClientsPage() {
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold text-gray-900">Add Client Organisation</h2>
               <button
-                onClick={() => {
-                  setShowAddModal(false);
-                  setAddError("");
-                  setGstin("");
-                }}
+                onClick={() => { setShowAddModal(false); setAddError(""); setGstin(""); }}
                 className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100"
               >
                 <X className="w-5 h-5" />
@@ -234,31 +225,6 @@ export default function CAClientsPage() {
                   maxLength={15}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-700 block mb-1.5">
-                  Commission Rate
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={(parseFloat(commissionRate) * 100).toFixed(1)}
-                    onChange={(e) =>
-                      setCommissionRate((parseFloat(e.target.value) / 100).toFixed(4))
-                    }
-                    min="0"
-                    max="50"
-                    step="0.5"
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
-                    %
-                  </span>
-                </div>
-                <p className="text-xs text-gray-400 mt-1">
-                  Default 15%. You earn this percentage of each client subscription payment.
-                </p>
               </div>
 
               {addError && <p className="text-xs text-red-600 font-medium">{addError}</p>}

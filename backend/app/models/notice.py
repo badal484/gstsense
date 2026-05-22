@@ -32,6 +32,7 @@ class DraftStatus(str, enum.Enum):
     generated = "generated"
     reviewed = "reviewed"
     approved = "approved"
+    failed = "failed"
 
 
 class Notice(Base, UUIDMixin, TimestampMixin):

@@ -82,9 +82,9 @@ py-partiql-parser==0.5.5
 pyasn1==0.6.3
 pycodestyle==2.11.1
 pycparser==3.0
-pydantic>=2.7.4
+pydantic==2.7.4
 pydantic-settings==2.3.0
-pydantic_core==2.18.1
+pydantic_core==2.18.4
 pyflakes==3.2.0
 Pygments==2.20.0
 pypdfium2==5.8.0

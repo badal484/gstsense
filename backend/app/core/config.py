@@ -112,6 +112,18 @@ class Settings(BaseSettings):
             v = v.replace("postgres://", "postgresql+asyncpg://", 1)
         return v
 
+    @field_validator("REDIS_URL")
+    @classmethod
+    def validate_redis_url(cls, v: str) -> str:
+        if not v.startswith(("redis://", "rediss://", "unix://")):
+            raise ValueError(
+                "REDIS_URL must start with redis://, rediss://, or unix://"
+            )
+        if v.startswith("rediss://") and "ssl_cert_reqs" not in v:
+            separator = "&" if "?" in v else "?"
+            v = f"{v}{separator}ssl_cert_reqs=none"
+        return v
+
     @field_validator("SECRET_KEY", "JWT_SECRET_KEY")
     @classmethod
     def validate_secret_length(cls, v: str) -> str:

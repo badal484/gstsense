@@ -19,6 +19,7 @@ class SubscriptionPlan(str, enum.Enum):
 
 
 class SubscriptionStatus(str, enum.Enum):
+    pending = "pending"   # created, awaiting first payment
     active = "active"
     cancelled = "cancelled"
     past_due = "past_due"

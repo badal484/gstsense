@@ -37,7 +37,9 @@ class CAFirmCreate(BaseModel):
 
     @field_validator("icai_firm_registration_number")
     @classmethod
-    def validate_firm_reg(cls, v: str) -> str:
+    def validate_firm_reg(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
         normalized = v.strip().upper()
         if not _ICAI_FIRM_PATTERN.match(normalized):
             raise ValueError("ICAI firm registration number must be 3–20 alphanumeric characters")

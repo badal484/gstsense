@@ -476,7 +476,7 @@ type SubInfo = {
 const PLAN_HIERARCHY: Record<string, number> = { free: 0, smb: 1, growth: 2, ca_firm: 3 };
 
 function BillingTab({ org }: { org: Organization }) {
-  const { user } = useAuthStore();
+  const { user, setUserAndOrg } = useAuthStore();
   const { initiateSubscription, isLoading: hookLoading } = useSubscriptionPayment();
   const planLabel = PLAN_LIMITS[org.plan]?.label ?? org.plan;
   const currentTier = PLAN_HIERARCHY[org.plan] ?? 0;
@@ -504,9 +504,19 @@ function BillingTab({ org }: { org: Organization }) {
       label,
       async () => {
         setUpgradeMsg(`Successfully upgraded to ${label} plan.`);
+        try {
+          const meResp = await api.get("/api/v1/auth/me");
+          const { user: freshUser, organization: freshOrg } = meResp.data.data ?? {};
+          if (freshUser && freshOrg) setUserAndOrg(freshUser, freshOrg);
+        } catch (e) {
+          console.error("Failed to refresh user/org info", e);
+        }
         const r = await api.get("/api/v1/subscriptions/current");
         setSub(r.data?.data ?? null);
         setUpgradingPlan(null);
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
       },
       (err) => {
         setUpgradeMsg(err || "Upgrade failed. Please try again.");

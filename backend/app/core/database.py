@@ -18,11 +18,16 @@ logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # SSL context (used for RDS / managed Postgres that require SSL)
+# Only active when DATABASE_SSL=true in the environment.
 # ---------------------------------------------------------------------------
 
-_ssl_ctx = _ssl.create_default_context()
-_ssl_ctx.check_hostname = False
-_ssl_ctx.verify_mode = _ssl.CERT_NONE
+def _build_connect_args() -> dict:
+    if not settings.DATABASE_SSL:
+        return {}
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+    return {"ssl": ctx}
 
 # ---------------------------------------------------------------------------
 # Engine
@@ -36,7 +41,7 @@ engine: AsyncEngine = create_async_engine(
     pool_recycle=settings.DATABASE_POOL_RECYCLE,
     pool_pre_ping=True,
     echo=settings.DEBUG,
-    connect_args={"ssl": _ssl_ctx},
+    connect_args=_build_connect_args(),
 )
 
 # ---------------------------------------------------------------------------
@@ -100,7 +105,7 @@ async def celery_db_session() -> AsyncGenerator[AsyncSession, None]:
     errors because connections are loop-bound. NullPool creates a fresh
     connection per session and discards it on close.
     """
-    _engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool, connect_args={"ssl": _ssl_ctx})
+    _engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool, connect_args=_build_connect_args())
     factory = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
     try:
         async with factory() as session:

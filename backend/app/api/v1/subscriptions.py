@@ -86,6 +86,8 @@ async def create_subscription(
     )
     existing_sub = existing_result.scalar_one_or_none()
 
+    # Block re-subscription only for active subscriptions.
+    # Pending subscriptions (Razorpay created but not yet paid) can be re-attempted.
     if existing_sub is not None and existing_sub.status == SubStatus.active:
         raise ConflictError(
             message="Organisation already has an active subscription.",
@@ -101,6 +103,17 @@ async def create_subscription(
         "ca_firm": settings.RAZORPAY_PLAN_ID_CA_FIRM,
     }
     razorpay_plan_id = plan_id_map[request_body.plan]
+
+    if (
+        not razorpay_plan_id
+        or "placeholder" in razorpay_plan_id.lower()
+        or not razorpay_plan_id.startswith("plan_")
+    ):
+        raise ValidationError(
+            message=f"Razorpay Plan ID for '{request_body.plan}' is not configured. "
+            "Please configure the plans in your Razorpay dashboard and update the environment variables.",
+            code="PLAN_NOT_CONFIGURED",
+        )
 
     try:
         client = get_razorpay_client()
@@ -120,15 +133,15 @@ async def create_subscription(
         logger.warning("razorpay_subscription_create_failed", error=str(exc))
 
     today = date.today()
-    # If Razorpay returned a subscription ID, payment hasn't happened yet — don't
-    # activate the org plan now. The plan is activated by /verify after the user pays.
-    # If Razorpay is not configured (dev mode / no plan IDs set), activate immediately
-    # as a convenience so developers can test the feature without a live Razorpay account.
+    # If Razorpay returned a subscription ID, payment hasn't happened yet.
+    # Keep the subscription as `pending` until /verify confirms the first payment.
+    # If Razorpay is not configured (dev mode / no plan IDs set), activate immediately.
     activate_immediately = razorpay_sub_id is None
+    sub_status = SubStatus.active if activate_immediately else SubStatus.pending
 
     if existing_sub is not None:
         existing_sub.plan = SUB_PLAN_MAP[request_body.plan]
-        existing_sub.status = SubStatus.active
+        existing_sub.status = sub_status
         existing_sub.razorpay_subscription_id = razorpay_sub_id or existing_sub.razorpay_subscription_id
         existing_sub.current_period_start = today
         existing_sub.current_period_end = today + timedelta(days=30)
@@ -139,13 +152,15 @@ async def create_subscription(
         sub = Subscription(
             organization_id=org.id,
             plan=SUB_PLAN_MAP[request_body.plan],
-            status=SubStatus.active,
+            status=sub_status,
             razorpay_subscription_id=razorpay_sub_id,
             current_period_start=today,
             current_period_end=today + timedelta(days=30),
         )
         db.add(sub)
 
+    # Only upgrade org plan immediately in dev mode (no Razorpay configured).
+    # In production, org plan is upgraded by /verify after the user pays.
     if activate_immediately:
         org.plan = PLAN_MAP[request_body.plan]
         org.subscription_status = SubscriptionStatus.active
@@ -192,8 +207,11 @@ async def get_current_subscription(
         .limit(1)
     )
     sub = result.scalar_one_or_none()
-    if sub is None:
-        return make_response(None)
+    if sub is None or sub.status != SubStatus.active:
+        raise NotFoundError(
+            message="No active subscription found for this organization.",
+            code="NF_SUB_001",
+        )
 
     return make_response(
         SubscriptionResponse(
@@ -236,7 +254,7 @@ async def cancel_subscription(
     if sub.razorpay_subscription_id:
         try:
             client = get_razorpay_client()
-            client.subscription.cancel(sub.razorpay_subscription_id)
+            client.subscription.cancel(sub.razorpay_subscription_id, {"cancel_at_cycle_end": 1})
         except Exception as exc:
             logger.warning("razorpay_cancel_failed", error=str(exc))
 
@@ -303,10 +321,13 @@ async def verify_subscription(
     if sub is None:
         raise NotFoundError(message="Subscription not found.", code="NF_010")
 
-    # 3. Activate
+    # 3. Activate — upgrade org plan and mark subscription active
+    today = date.today()
     sub.status = SubStatus.active
-    org.subscription_status = SubscriptionStatus.active
     org.plan = PLAN_MAP.get(sub.plan.value, Plan.smb)
+    org.subscription_status = SubscriptionStatus.active
+    org.billing_cycle_start = today
+    org.billing_cycle_end = today + timedelta(days=30)
 
     db.add(AuditLog(
         action="subscription_verified",
@@ -314,6 +335,7 @@ async def verify_subscription(
         organization_id=org.id,
         metadata_json={
             "razorpay_subscription_id": body.razorpay_subscription_id,
+            "razorpay_payment_id": body.razorpay_payment_id,
             "plan": sub.plan.value,
         },
     ))

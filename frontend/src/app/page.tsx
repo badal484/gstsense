@@ -246,78 +246,129 @@ function Features() {
 }
 
 function Pricing() {
+  const plans = [
+    {
+      name: "Free",
+      price: "₹0",
+      period: "",
+      desc: "Scan preview and basic checking",
+      features: [
+        "Upload GSTR-1 & GSTR-3B",
+        "See total mismatch count",
+        "See total rupee risk",
+        "Top 3 mismatches preview",
+      ],
+      cta: "Get Started Free",
+      popular: false,
+      dark: false,
+    },
+    {
+      name: "SMB",
+      price: "₹999",
+      period: "/month",
+      desc: "Unlimited scans for standard businesses",
+      features: [
+        "Everything in Free",
+        "Unlimited scans",
+        "Up to 1,500 invoices / month",
+        "PDF report download",
+      ],
+      cta: "Upgrade to SMB",
+      popular: false,
+      dark: false,
+    },
+    {
+      name: "Growth",
+      price: "₹2,499",
+      period: "/month",
+      desc: "For growing businesses needing ITC recovery",
+      features: [
+        "Everything in SMB",
+        "ITC Recovery engine",
+        "Up to 5,000 invoices / month",
+        "Email & WhatsApp alerts",
+      ],
+      cta: "Upgrade to Growth",
+      popular: true,
+      dark: true,
+    },
+    {
+      name: "CA Firm",
+      price: "₹9,999",
+      period: "/month",
+      desc: "For CAs and tax practitioners",
+      features: [
+        "Everything in Growth",
+        "White-label client portal",
+        "Custom branding & colors",
+        "Up to 50,000 invoices / month",
+        "15% referral commission",
+      ],
+      cta: "Upgrade to CA Firm",
+      popular: false,
+      dark: false,
+    },
+  ];
+
   return (
     <section id="pricing" className="py-20 px-4 sm:px-6 bg-gray-50">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="text-center mb-12">
           <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
             Simple, transparent pricing
           </h2>
-          <p className="text-gray-500">
-            Pay only when you need the full report. The summary preview is always free.
+          <p className="text-gray-500 max-w-xl mx-auto">
+            Choose the perfect plan for your business compliance and client portfolios.
           </p>
         </div>
 
-        <div className="grid sm:grid-cols-2 gap-6 max-w-2xl mx-auto">
-          <div className="bg-white rounded-2xl border border-gray-200 p-8 shadow-sm">
-            <div className="mb-4">
-              <div className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-1">Free Preview</div>
-              <div className="text-4xl font-black text-gray-900">₹0</div>
-            </div>
-            <ul className="space-y-3 mb-8">
-              {[
-                "Upload GSTR-1 & GSTR-3B",
-                "See total mismatch count",
-                "See total rupee risk",
-                "Top 3 mismatches preview",
-              ].map((item) => (
-                <li key={item} className="flex items-center gap-2 text-sm text-gray-600">
-                  <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
-                  {item}
-                </li>
-              ))}
-            </ul>
-            <Link
-              href={ROUTES.SIGNUP}
-              className="block text-center bg-gray-100 text-gray-800 font-semibold px-6 py-3 rounded-xl hover:bg-gray-200 transition-colors"
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {plans.map((p) => (
+            <div
+              key={p.name}
+              className={`rounded-2xl p-6 border flex flex-col justify-between shadow-sm relative ${
+                p.dark
+                  ? "bg-blue-700 border-blue-800 text-white shadow-lg shadow-blue-200"
+                  : "bg-white border-gray-200 text-gray-900"
+              }`}
             >
-              Get Free Preview
-            </Link>
-          </div>
-
-          <div className="bg-blue-700 rounded-2xl p-8 shadow-lg shadow-blue-200 relative overflow-hidden">
-            <div className="absolute top-4 right-4 bg-orange-400 text-white text-xs font-bold px-2 py-1 rounded-full">
-              MOST POPULAR
-            </div>
-            <div className="mb-4">
-              <div className="text-sm font-semibold text-blue-200 uppercase tracking-wide mb-1">Full Report</div>
-              <div className="flex items-end gap-1">
-                <div className="text-4xl font-black text-white">₹{ONE_TIME_SCAN_PRICE}</div>
-                <div className="text-blue-200 text-sm mb-1">/scan</div>
+              {p.popular && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-orange-400 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+                  Most Popular
+                </div>
+              )}
+              <div>
+                <div className="mb-4">
+                  <div className={`text-xs font-bold uppercase tracking-wider mb-1 ${p.dark ? "text-blue-200" : "text-gray-400"}`}>
+                    {p.name}
+                  </div>
+                  <div className="flex items-end gap-1">
+                    <div className="text-3xl font-black">{p.price}</div>
+                    <div className={`text-xs mb-1 ${p.dark ? "text-blue-200" : "text-gray-500"}`}>{p.period}</div>
+                  </div>
+                  <p className={`text-xs mt-2 leading-relaxed ${p.dark ? "text-blue-100" : "text-gray-500"}`}>{p.desc}</p>
+                </div>
+                <ul className="space-y-3 mb-8">
+                  {p.features.map((item) => (
+                    <li key={item} className="flex items-start gap-2 text-xs">
+                      <CheckCircle className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${p.dark ? "text-blue-300" : "text-green-500"}`} />
+                      <span className={p.dark ? "text-blue-100" : "text-gray-600"}>{item}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
+              <Link
+                href={ROUTES.SIGNUP}
+                className={`block text-center text-xs font-bold py-3 rounded-xl transition-colors ${
+                  p.dark
+                    ? "bg-white text-blue-700 hover:bg-blue-50"
+                    : "bg-gray-100 text-gray-800 hover:bg-gray-200"
+                }`}
+              >
+                {p.cta}
+              </Link>
             </div>
-            <ul className="space-y-3 mb-8">
-              {[
-                "Everything in Free",
-                "All mismatches, unlimited rows",
-                "AI explanation for each item",
-                "PDF report download",
-                "WhatsApp notification",
-                "30-day report access",
-              ].map((item) => (
-                <li key={item} className="flex items-center gap-2 text-sm text-blue-100">
-                  <CheckCircle className="w-4 h-4 text-blue-300 shrink-0" />
-                  {item}
-                </li>
-              ))}
-            </ul>
-            <Link
-              href={ROUTES.SIGNUP}
-              className="block text-center bg-white text-blue-700 font-bold px-6 py-3 rounded-xl hover:bg-blue-50 transition-colors"
-            >
-              Unlock Full Report
-            </Link>
-          </div>
+          ))}
         </div>
       </div>
     </section>

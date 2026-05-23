@@ -241,7 +241,9 @@ export default function ITCPage() {
       "growth",
       user?.email ?? "",
       "Growth",
-      () => {},
+      () => {
+        window.location.reload();
+      },
       () => {},
     );
   }

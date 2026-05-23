@@ -49,7 +49,7 @@ export function useSubscriptionPayment() {
       plan: string,
       userEmail: string,
       planLabel: string,
-      onSuccess: () => void,
+      onSuccess: (data?: any) => void,
       onFailure: (err: string) => void,
     ): Promise<void> => {
       setIsLoading(true)
@@ -84,7 +84,7 @@ export function useSubscriptionPayment() {
           description: `${planLabel} — ₹${(data.amount_paise / 100).toLocaleString("en-IN")}/month`,
           handler: async (response: RazorpaySubResponse) => {
             try {
-              await subscriptionApi.verify({
+              const verifyRes = await subscriptionApi.verify({
                 razorpay_subscription_id: response.razorpay_subscription_id,
                 razorpay_payment_id: response.razorpay_payment_id,
                 razorpay_signature: response.razorpay_signature,
@@ -93,7 +93,7 @@ export function useSubscriptionPayment() {
               const { user: freshUser, organization: freshOrg } = meResp.data.data ?? {}
               if (freshUser && freshOrg) setUserAndOrg(freshUser, freshOrg)
               setIsLoading(false)
-              onSuccess()
+              onSuccess(verifyRes.data?.data)
             } catch (verifyErr) {
               const msg = verifyErr instanceof Error ? verifyErr.message : "Payment verification failed"
               setError(msg)

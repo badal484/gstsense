@@ -343,7 +343,8 @@ async def razorpay_webhook(
 
     elif event == "subscription.charged":
         from datetime import timedelta
-        from app.models.subscription import Subscription, SubscriptionStatus as SubStatus
+        from app.models.subscription import Subscription, SubscriptionStatus as SubStatus, SubscriptionPlan
+        from app.models.organization import Plan as OrgPlan, SubscriptionStatus as OrgSubStatus
         try:
             sub_id = payload["payload"]["subscription"]["entity"]["id"]
         except (KeyError, TypeError):
@@ -364,16 +365,28 @@ async def razorpay_webhook(
             )
             org_sub = org_sub_result.scalar_one_or_none()
             if org_sub:
-                from app.models.organization import SubscriptionStatus as OrgSubStatus
+                # Upgrade the org plan on every successful charge (handles both
+                # first payment and renewals). Maps subscription plan → org plan.
+                _plan_map = {
+                    SubscriptionPlan.smb: OrgPlan.smb,
+                    SubscriptionPlan.growth: OrgPlan.growth,
+                    SubscriptionPlan.ca_firm: OrgPlan.ca_firm,
+                }
+                org_sub.plan = _plan_map.get(sub.plan, OrgPlan.smb)
                 org_sub.subscription_status = OrgSubStatus.active
+                org_sub.billing_cycle_start = today
+                org_sub.billing_cycle_end = today + timedelta(days=30)
 
             db.add(AuditLog(
-                action="subscription_renewed",
+                action="subscription_charged",
                 organization_id=sub.organization_id,
-                metadata_json={"razorpay_subscription_id": sub_id},
+                metadata_json={
+                    "razorpay_subscription_id": sub_id,
+                    "plan": sub.plan.value,
+                },
             ))
             await db.commit()
-            logger.info("webhook_subscription_charged", sub_id=sub_id)
+            logger.info("webhook_subscription_charged", sub_id=sub_id, plan=sub.plan.value)
 
     elif event == "subscription.cancelled":
         from app.models.subscription import Subscription, SubscriptionStatus as SubStatus

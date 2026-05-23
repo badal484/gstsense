@@ -68,7 +68,10 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
-    config.headers["X-Request-ID"] = crypto.randomUUID()
+    config.headers["X-Request-ID"] =
+      typeof crypto?.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`
     return config
   },
   (error) => Promise.reject(error),

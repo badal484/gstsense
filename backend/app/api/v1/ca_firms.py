@@ -295,6 +295,12 @@ async def get_dashboard(
     status_code=status.HTTP_201_CREATED,
     summary="Add client organization by GSTIN",
 )
+@router.post(
+    "/me/clients",
+    response_model=ApiResponse[CAClientResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Add client organization by GSTIN (me prefix)",
+)
 async def add_client(
     body: AddClientRequest,
     current_user: User = Depends(get_current_user),
@@ -373,6 +379,11 @@ async def add_client(
     response_model=ApiResponse[list[CAClientResponse]],
     summary="List all clients",
 )
+@router.get(
+    "/me/clients",
+    response_model=ApiResponse[list[CAClientResponse]],
+    summary="List all clients (me prefix)",
+)
 async def list_clients(
     status_filter: Optional[str] = None,
     current_user: User = Depends(get_current_user),
@@ -398,6 +409,11 @@ async def list_clients(
     "/clients/{org_id}",
     response_model=ApiResponse[CAClientResponse],
     summary="Get client details",
+)
+@router.get(
+    "/me/clients/{org_id}",
+    response_model=ApiResponse[CAClientResponse],
+    summary="Get client details (me prefix)",
 )
 async def get_client(
     org_id: uuid.UUID,
@@ -426,6 +442,11 @@ async def get_client(
     "/clients/{org_id}",
     response_model=ApiResponse[dict],
     summary="Remove a client",
+)
+@router.delete(
+    "/me/clients/{org_id}",
+    response_model=ApiResponse[dict],
+    summary="Remove a client (me prefix)",
 )
 async def remove_client(
     org_id: uuid.UUID,

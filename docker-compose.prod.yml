@@ -52,6 +52,6 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://13.127.242.95:8000
+      NEXT_PUBLIC_API_URL: http://13.232.98.37:8000
       NODE_ENV: production
 

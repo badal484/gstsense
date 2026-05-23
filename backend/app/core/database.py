@@ -9,10 +9,20 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+import ssl as _ssl
+
 from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# SSL context (used for RDS / managed Postgres that require SSL)
+# ---------------------------------------------------------------------------
+
+_ssl_ctx = _ssl.create_default_context()
+_ssl_ctx.check_hostname = False
+_ssl_ctx.verify_mode = _ssl.CERT_NONE
 
 # ---------------------------------------------------------------------------
 # Engine
@@ -24,11 +34,9 @@ engine: AsyncEngine = create_async_engine(
     max_overflow=settings.DATABASE_MAX_OVERFLOW,
     pool_timeout=settings.DATABASE_POOL_TIMEOUT,
     pool_recycle=settings.DATABASE_POOL_RECYCLE,
-    # Detect stale connections before using them – prevents "connection
-    # already closed" errors after a database server restart or idle timeout.
     pool_pre_ping=True,
-    # Only emit SQL statements to the logger when DEBUG is active.
     echo=settings.DEBUG,
+    connect_args={"ssl": _ssl_ctx},
 )
 
 # ---------------------------------------------------------------------------
@@ -92,7 +100,7 @@ async def celery_db_session() -> AsyncGenerator[AsyncSession, None]:
     errors because connections are loop-bound. NullPool creates a fresh
     connection per session and discards it on close.
     """
-    _engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+    _engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool, connect_args={"ssl": _ssl_ctx})
     factory = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
     try:
         async with factory() as session:

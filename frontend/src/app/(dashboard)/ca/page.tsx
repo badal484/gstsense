@@ -249,7 +249,7 @@ export default function CADashboardPage() {
             PREMIUM PLAN
           </div>
           
-          <h2 className="text-lg font-bold text-gray-800 border-b border-gray-100 pb-3">What's included in CA Firm Plan:</h2>
+          <h2 className="text-lg font-bold text-gray-800 border-b border-gray-100 pb-3">{"What's included in CA Firm Plan:"}</h2>
           
           <ul className="space-y-4">
             <li className="flex items-start gap-3">

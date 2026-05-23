@@ -519,7 +519,7 @@ function BillingTab({ org }: { org: Organization }) {
         }, 1500);
       },
       (err) => {
-        setUpgradeMsg(err || "Upgrade failed. Please try again.");
+        setUpgradeMsg(err ? `Upgrade failed: ${err}` : "Upgrade failed. Please try again.");
         setUpgradingPlan(null);
       },
     );

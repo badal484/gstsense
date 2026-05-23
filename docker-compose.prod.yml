@@ -48,6 +48,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://13.232.98.37:8000
     restart: unless-stopped
     ports:
       - "3000:3000"

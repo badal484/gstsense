@@ -14,7 +14,7 @@ from app.api.deps import (
 )
 from app.core.config import settings
 from app.core.exceptions import AuthenticationError, ValidationError
-from app.core.security import add_user_to_blocklist, create_access_token, create_refresh_token, generate_secure_token, hash_password, verify_password
+from app.core.security import add_user_to_blocklist, remove_user_from_blocklist, create_access_token, create_refresh_token, generate_secure_token, hash_password, verify_password
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.schemas.auth import (
@@ -113,6 +113,7 @@ async def login(
     )
     refresh_token = create_refresh_token(user_id=str(user.id))
     await service.store_refresh_token(user.id, refresh_token)
+    await remove_user_from_blocklist(str(user.id))
     await db.commit()
 
     return make_response(

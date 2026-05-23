@@ -286,6 +286,17 @@ async def is_user_blocked(user_id: str) -> bool:
         await r.aclose()
 
 
+async def remove_user_from_blocklist(user_id: str) -> None:
+    """Remove user_id from the blocklist."""
+    r = aioredis.from_url(settings.REDIS_URL)
+    try:
+        await r.delete(f"blocked_user:{user_id}")
+    except Exception:
+        pass
+    finally:
+        await r.aclose()
+
+
 # ---------------------------------------------------------------------------
 # Secure token generation
 # ---------------------------------------------------------------------------
